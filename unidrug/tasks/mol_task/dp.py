@@ -1684,7 +1684,7 @@ def parse_args():
         choices=["scaffold", "random", "kfold"],
         help="MoleculeNet split strategy. Different strategies can change AUC noticeably.",
     )
-    parser.add_argument("--device", type=str, default="cuda:4")
+    parser.add_argument("--device", type=str, default="cuda:0")
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--accumulation_steps", type=int, default=1, help="Gradient accumulation steps")
     parser.add_argument("--epochs", type=int, default=80)

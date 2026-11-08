@@ -282,7 +282,7 @@ class DDIModel(nn.Module):
         self.attn_pool_ratio = nn.Parameter(torch.tensor(0.85))
 
         kg_path = net_cfg.get("kg_path", net_cfg.get("drug", {}).get("kg", {}).get(
-            "kg_path", os.path.join(os.environ.get("UNIDRUG_ASSET_ROOT", "/data-nxs/songlongjun/KEDD_temporal-master"), "assets/kg/BMKG")))
+            "kg_path", os.path.join(os.environ.get("UNIDRUG_ASSET_ROOT", ""), "assets/kg/BMKG")))
         self.prompt_composer = DDIPromptComposer({
             "drug_text_path": net_cfg.get("drug_text_path"),
             "kg_path": kg_path,

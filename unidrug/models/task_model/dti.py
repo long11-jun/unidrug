@@ -813,7 +813,7 @@ class DTIModel(nn.Module):
         
         # ========== 1. Prompt Composer ==========
         kg_path = config.get("kg_path", net_cfg.get(
-            "kg_path", os.path.join(os.environ.get("UNIDRUG_ASSET_ROOT", "/data-nxs/songlongjun/KEDD_temporal-master"), "assets/kg/BMKG")))
+            "kg_path", os.path.join(os.environ.get("UNIDRUG_ASSET_ROOT", ""), "assets/kg/BMKG")))
         self.prompt_composer = DTIPromptComposer(kg_path)
         
         # ========== 2. Encoders ==========
