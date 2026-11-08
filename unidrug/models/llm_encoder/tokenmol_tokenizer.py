@@ -1,10 +1,5 @@
 """
-Token-Mol 自定义 Tokenizer
 
-Token-Mol 使用 CSV 格式的词表文件（每行一个 token），这个类负责：
-1. 加载 CSV 词表
-2. 提供 encode/decode 接口
-3. 兼容 HuggingFace Transformers 的调用方式（__call__, pad_token, eos_token 等）
 """
 import os
 from typing import List, Dict, Union, Optional
@@ -13,14 +8,10 @@ import torch
 
 class TokenMolTokenizer:
     """
-    Token-Mol CSV 词表的自定义 Tokenizer
     
-    词表格式：每行一个 token（第一行是 [PAD]）
-    特殊 token（从 config.json 读取）：
     - pad_token_id: 0 ([PAD])
     - bos_token_id: 825 (<|beginoftext|>)
     - eos_token_id: 826 (<|endofmask|>)
-    - mask_token_id: 827 ([MASK] 或 <|mask:0|>)
     """
     
     def __init__(
@@ -35,19 +26,16 @@ class TokenMolTokenizer:
     ):
         self.vocab_file = vocab_file
         
-        # 加载词表
         self.vocab: Dict[str, int] = {}
         self.ids_to_tokens: Dict[int, str] = {}
         self._load_vocab(vocab_file)
         
-        # 特殊 token
         self.pad_token = pad_token
         self.bos_token = bos_token
         self.eos_token = eos_token
         self.unk_token = unk_token
         self.mask_token = mask_token
         
-        # 特殊 token ID（从词表查找）
         self.pad_token_id = self.vocab.get(pad_token, 0)
         self.bos_token_id = self.vocab.get(bos_token, self.vocab.get("[CLS]", 0))
         self.eos_token_id = self.vocab.get(eos_token, self.vocab.get("[SEP]", 0))
@@ -57,14 +45,14 @@ class TokenMolTokenizer:
         self.vocab_size = len(self.vocab)
         
     def _load_vocab(self, vocab_file: str):
-        """加载 CSV 词表（每行一个 token）"""
+        
         if not os.path.exists(vocab_file):
             raise FileNotFoundError(f"Vocab file not found: {vocab_file}")
         
         with open(vocab_file, "r", encoding="utf-8") as f:
             for idx, line in enumerate(f):
                 token = line.strip()
-                if token:  # 跳过空行
+                if token:
                     self.vocab[token] = idx
                     self.ids_to_tokens[idx] = token
     
@@ -77,13 +65,9 @@ class TokenMolTokenizer:
         **kwargs
     ) -> List[int]:
         """
-        将文本编码为 token ID 列表
         
-        对于 Token-Mol，输入通常是 SMILES + property tokens，格式如：
         "C C O [qed] 0.85 [logp] 1.2 ..."
-        或直接是 token 序列（空格分隔）
         """
-        # Token-Mol 的输入通常是“空格分隔的 token 序列”
         tokens = text.split()
         
         ids = []
@@ -94,13 +78,11 @@ class TokenMolTokenizer:
             if token in self.vocab:
                 ids.append(self.vocab[token])
             else:
-                # 未知 token
                 ids.append(self.unk_token_id)
         
         if add_special_tokens and self.eos_token_id is not None:
             ids.append(self.eos_token_id)
         
-        # 截断
         if truncation and max_length is not None and len(ids) > max_length:
             ids = ids[:max_length]
         
@@ -113,7 +95,7 @@ class TokenMolTokenizer:
         max_length: Optional[int] = None,
         truncation: bool = False,
     ) -> List[int]:
-        """直接从 token 列表编码为 ids（比 encode(text) 更安全）。"""
+        
         ids: List[int] = []
         if add_special_tokens and self.bos_token_id is not None:
             ids.append(self.bos_token_id)
@@ -131,7 +113,7 @@ class TokenMolTokenizer:
         skip_special_tokens: bool = True,
         **kwargs
     ) -> str:
-        """将 token ID 列表解码为文本"""
+        
         if isinstance(token_ids, torch.Tensor):
             token_ids = token_ids.tolist()
         
@@ -156,16 +138,11 @@ class TokenMolTokenizer:
         **kwargs
     ) -> Dict[str, Union[List, torch.Tensor]]:
         """
-        兼容 HuggingFace Transformers 的 __call__ 接口
         
-        返回 dict 包含：
-        - input_ids: token ID 列表或 tensor
-        - attention_mask: 注意力掩码
         """
         if isinstance(text, str):
             text = [text]
         
-        # 编码所有文本
         all_ids = []
         for t in text:
             ids = self.encode(t, add_special_tokens=True, max_length=max_length, truncation=truncation)
@@ -196,7 +173,6 @@ class TokenMolTokenizer:
             "attention_mask": attention_masks,
         }
         
-        # 转换为 tensor
         if return_tensors == "pt":
             result["input_ids"] = torch.tensor(result["input_ids"], dtype=torch.long)
             result["attention_mask"] = torch.tensor(result["attention_mask"], dtype=torch.long)
@@ -211,7 +187,7 @@ class TokenMolTokenizer:
 
 
 class BatchEncoding(dict):
-    """简易 BatchEncoding，兼容 .to(device) 调用"""
+    
     
     def to(self, device):
         result = {}

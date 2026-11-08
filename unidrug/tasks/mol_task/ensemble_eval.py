@@ -1,14 +1,8 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-科学集成多模型集成评估
 
-科学依据：
-1. 偏差-方差分解：n 个独立模型集成，方差降为 1/n
-2. Wisdom of Crowds：不同初始化 → 不同局部最优 → 平均更接近真实分布
-3. 在分类任务上，概率平均 (soft voting) 通常优于硬投票
 
-使用方法：
     python ensemble_eval.py --ensemble_dir /path/to/ensemble --dataset BBBP
 """
 
@@ -25,7 +19,6 @@ import torch
 from sklearn.metrics import roc_auc_score
 from torch.utils.data import DataLoader
 
-# 包目录用于 import datasets/models/utils；仓库根目录用于绝对路径资源
 _pkg_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 _repo_root = os.path.abspath(os.path.join(_pkg_root, '..'))
 sys.path.insert(0, _repo_root)
@@ -43,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 
 def _build_kge_bank(dataset) -> Tuple[Optional[torch.Tensor], Optional[List[str]]]:
-    """从 dataset.kge 构建 global bank（与训练保持一致，用于 KG 补全解释/推理）"""
+    
     kge_bank = None
     kge_keys = None
     try:
@@ -67,10 +60,9 @@ def load_model(
     num_tasks: int,
     test_dataset,
 ) -> DPModel:
-    """加载单个模型"""
+    
     from utils.paths import expand_asset_paths
     cfg = expand_asset_paths(json.load(open(config_path)))
-    # 与训练保持一致：把 dataset_name/task_names 写入 config
     try:
         cfg["network"]["dataset_name"] = getattr(test_dataset, "dataset_name", cfg["network"].get("dataset_name"))
     except Exception:
@@ -89,7 +81,6 @@ def load_model(
     else:
         state_dict = checkpoint
     
-    # 处理可能的 key 不匹配
     model.load_state_dict(state_dict, strict=False)
     model.to(device)
     model.eval()
@@ -105,17 +96,10 @@ def ensemble_predict(
     ensemble_method: str = "mean",
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
-    集成预测
     
     Args:
-        models: 模型列表
-        loader: 数据加载器
-        device: 设备
-        ensemble_method: 集成方法 ("mean", "median", "max")
     
     Returns:
-        all_probs: 集成后的预测概率
-        all_labels: 真实标签
     """
     all_probs_list = [[] for _ in models]
     all_labels = []
@@ -125,7 +109,6 @@ def ensemble_predict(
             drug = ToDevice(drug, device)
             label = label.numpy()
             
-            # 每个模型分别预测
             for i, model in enumerate(models):
                 output, _ = model(drug)
                 probs = torch.sigmoid(output["classification"]).cpu().numpy()
@@ -133,11 +116,9 @@ def ensemble_predict(
             
             all_labels.append(label)
     
-    # 合并 batch
     all_probs_list = [np.concatenate(probs, axis=0) for probs in all_probs_list]
     all_labels = np.concatenate(all_labels, axis=0)
     
-    # 集成
     stacked = np.stack(all_probs_list, axis=0)  # (num_models, N, num_tasks)
     
     if ensemble_method == "mean":
@@ -153,7 +134,7 @@ def ensemble_predict(
 
 
 def compute_auc(probs: np.ndarray, labels: np.ndarray) -> float:
-    """计算 ROC-AUC，处理多标签情况"""
+    
     valid_cols = []
     aucs = []
     
@@ -164,7 +145,6 @@ def compute_auc(probs: np.ndarray, labels: np.ndarray) -> float:
         y_true = labels[mask, col]
         y_pred = probs[mask, col]
         
-        # 确保有正负样本
         if len(np.unique(y_true)) < 2:
             continue
         
@@ -193,7 +173,6 @@ def main():
                         choices=["mean", "median", "max"])
     args = parser.parse_args()
     
-    # 查找所有模型
     model_paths = sorted(glob.glob(os.path.join(args.ensemble_dir, "*.pt")))
     if not model_paths:
         logger.error(f"No models found in {args.ensemble_dir}")
@@ -203,7 +182,6 @@ def main():
     for path in model_paths:
         logger.info(f"  - {os.path.basename(path)}")
     
-    # 加载数据
     logger.info(f"Loading dataset: {args.dataset}")
     from utils.paths import expand_asset_paths
     cfg = expand_asset_paths(json.load(open(args.config_path)))
@@ -223,7 +201,6 @@ def main():
         collate_fn=test_dataset.collate_fn,
     )
     
-    # 加载所有模型
     models = []
     individual_aucs = []
     
@@ -231,20 +208,17 @@ def main():
         model = load_model(path, args.config_path, args.device, num_tasks=len(test_dataset.targets), test_dataset=test_dataset)
         models.append(model)
         
-        # 计算单模型 AUC
         probs, labels = ensemble_predict([model], test_loader, args.device)
         auc = compute_auc(probs, labels)
         individual_aucs.append(auc)
         logger.info(f"  {os.path.basename(path)}: Test AUC = {auc:.4f}")
     
-    # 集成预测
     logger.info(f"\nRunning ensemble prediction ({args.ensemble_method})...")
     ensemble_probs, all_labels = ensemble_predict(
         models, test_loader, args.device, args.ensemble_method
     )
     ensemble_auc = compute_auc(ensemble_probs, all_labels)
     
-    # 输出结果
     print("\n" + "=" * 60)
     print(" Ensemble Results")
     print("=" * 60)
@@ -256,7 +230,6 @@ def main():
     print(f"   Improvement:      +{(ensemble_auc - np.mean(individual_aucs)) * 100:.2f}%")
     print("=" * 60)
     
-    # 保存集成结果
     result_path = os.path.join(args.ensemble_dir, "ensemble_result.json")
     result = {
         "dataset": args.dataset,

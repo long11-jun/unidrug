@@ -81,7 +81,7 @@ class MoMu(MolEncoder, TextEncoder):
         logits_per_graph = features_graph @ features_text.t() / self.temperature
         logits_per_text = logits_per_graph.t()
 
-        labels = torch.arange(batch_size, dtype=torch.long, device=self.device)  # 大小为B
+        labels = torch.arange(batch_size, dtype=torch.long, device=self.device)
         loss_graph = F.cross_entropy(logits_per_graph, labels)
         loss_text = F.cross_entropy(logits_per_text, labels)
         loss = (loss_graph + loss_text) / 2

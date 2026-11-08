@@ -47,7 +47,6 @@ class BMKG(KG):
         link_drug, link_protein = 0, 0
         fallback_drug, fallback_protein = 0, 0
 
-        # 尝试从数据集路径加载fallback文本（如果存在）
         dataset_drugs = None
         dataset_proteins = None
         dataset_smi2drug = {}
@@ -60,23 +59,21 @@ class BMKG(KG):
             if os.path.exists(dataset_drug_path):
                 try:
                     dataset_drugs = json.load(open(dataset_drug_path, "r"))
-                    # 建立SMILES到drug条目的映射
                     for key, drug_data in dataset_drugs.items():
                         if "SMILES" in drug_data:
                             iso_smi = Chem.MolToSmiles(Chem.MolFromSmiles(drug_data["SMILES"]), isomericSmiles=True)
                             dataset_smi2drug[iso_smi] = drug_data
                 except Exception as e:
-                    logger.warning(f" 无法加载数据集drug.json作为fallback: {e}")
+                    logger.warning(f"Could not load dataset drug.json as fallback: {e}")
             
             if os.path.exists(dataset_protein_path):
                 try:
                     dataset_proteins = json.load(open(dataset_protein_path, "r"))
-                    # 建立sequence到protein条目的映射
                     for key, protein_data in dataset_proteins.items():
                         if "sequence" in protein_data:
                             dataset_seq2protein[protein_data["sequence"]] = protein_data
                 except Exception as e:
-                    logger.warning(f" 无法加载数据集protein.json作为fallback: {e}")
+                    logger.warning(f"Could not load dataset protein.json as fallback: {e}")
 
         drug2kg, drug2text = {}, {}
         if hasattr(dataset, 'smiles'):
@@ -88,7 +85,6 @@ class BMKG(KG):
                     drug2text[smi] = self.drugs[self.smi2drugid[iso_smi]]["text"].lower()
                 else:
                     drug2kg[smi] = None
-                    # Fallback: 从数据集路径下的drug.json提取text
                     if iso_smi in dataset_smi2drug:
                         drug_data = dataset_smi2drug[iso_smi]
                         if "text" in drug_data and drug_data["text"]:
@@ -109,7 +105,6 @@ class BMKG(KG):
                     protein2text[seq] = self.proteins[self.seq2proteinid[seq]]["text"].lower()
                 else:
                     protein2kg[seq] = None
-                    # Fallback: 从数据集路径下的protein.json提取text
                     if seq in dataset_seq2protein:
                         protein_data = dataset_seq2protein[seq]
                         if "text" in protein_data and protein_data["text"]:
@@ -130,9 +125,9 @@ class BMKGv2(KG):
             self.kg = pickle.load(open(path, "rb"))
         except (ModuleNotFoundError, AttributeError) as e:
             if 'numpy._core' in str(e) or 'numpy.core' in str(e):
-                logger.error(f" Pickle文件与当前numpy版本不兼容: {e}")
-                logger.error(f"请删除文件 {path} 并重新生成，或降级numpy版本")
-                raise RuntimeError(f"Pickle文件版本不兼容，请删除 {path} 并重新生成")
+                logger.error(f"Pickle file is incompatible with this numpy version: {e}")
+                logger.error(f"Delete {path} and rebuild it, or use the numpy version that wrote it")
+                raise RuntimeError(f"Incompatible pickle file. Delete {path} and rebuild it")
             else:
                 raise
         self.adj = {}
@@ -213,11 +208,10 @@ def embed(graph, model='ProNE', filter_out={}, dim=256, save=True, save_path='')
             return pickle.load(open(save_path, "rb"))
         except (ModuleNotFoundError, AttributeError) as e:
             if 'numpy._core' in str(e) or 'numpy.core' in str(e):
-                logger.warning(f" Pickle文件与当前numpy版本不兼容，将重新生成: {e}")
-                # 删除旧的pickle文件，重新生成
+                logger.warning(f"Pickle file is incompatible with this numpy version and will be rebuilt: {e}")
                 if os.path.exists(save_path):
                     os.remove(save_path)
-                    logger.info(f"已删除旧的pickle文件: {save_path}")
+                    logger.info(f"Removed old pickle file: {save_path}")
             else:
                 raise
 

@@ -37,7 +37,6 @@ class KGIDFeaturizer(KGFeaturizer):
     # data: SMILES
     def __call__(self, data):
         if self.transform is not None:
-            # 使用 get 避免 KeyError
             index = self.transform.get(data, None)
             if index == -1 or index is None:
                 index = self.max_index
@@ -56,7 +55,6 @@ class KGNeighbourFeaturizer(KGFeaturizer):
     def __call__(self, data):
         index_list = []
         if self.transform is not None:
-            # 使用 get 避免 KeyError
             index_list = self.transform.get(data, [])
             if len(index_list) > 0 and index_list[0] != -1:
                 return index_list
@@ -68,11 +66,7 @@ class KGNeighbourFeaturizer(KGFeaturizer):
 
 class KGEFeaturizer(KGFeaturizer):
     """
-    KGE Embedding Featurizer — 精确 ID 映射
     
-    对单个 SMILES 返回对应的 KG embedding:
-    - 精确匹配成功 → 返回 KG embedding
-    - 精确匹配失败 → 返回零向量（由 CMSA 补全）
     """
     
     def __init__(self, config):

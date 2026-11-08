@@ -1,9 +1,5 @@
 """
-PPIModel - 与 DTI/DP 架构对齐的蛋白质-蛋白质相互作用预测模型
 
-数据流（与 DTI 蛋白质支路一致）：
-    Raw Features → Feature Noise → SA-CMSA (KG补全) → Q-Former Adapters → Tokens
-    → 对比损失(PRE-CMON) → CMON(正交分解+digest) → 样本级模态Dropout
     → [modality markers + digest + tokens + prompt] → Qwen (LoRA) → Attention Pooling
     → ResidualPredictionHead → 7-class logits
 
@@ -23,7 +19,6 @@ from peft import LoraConfig, TaskType, get_peft_model
 
 logger = logging.getLogger(__name__)
 
-# 从 dp 导入共享组件
 from models.task_model.dp import (
     SparseAttentionCMSA,
     CMONModule,
@@ -31,7 +26,6 @@ from models.task_model.dp import (
     AttentionPooling,
     ResidualPredictionHead,
 )
-# DTI 的 ModalContrastiveLoss 接受 (B,N,D) tokens，与 PPI 适配
 from models.task_model.dti import (
     DeepMCNN,
     ProteinPropertyEncoder,
@@ -41,12 +35,9 @@ from models.task_model.dti import (
 
 
 # ============================================================
-# PPI Prompt Composer（与 DTI 风格对齐：含模态置信度）
 # ============================================================
 class PPIPromptComposer:
     """
-    PPI 任务 Prompt 构建器，与 DTI build_prompt 对齐：
-    任务描述 + Protein A/B 描述 + 各蛋白模态置信度 + 推理指导 + 预测锚点
     """
     
     def __init__(self, config: Dict):
@@ -121,7 +112,7 @@ class PPIPromptComposer:
         has_b_kg: bool = True,
         has_b_3d: bool = True,
     ) -> str:
-        """构建与 DTI 风格一致的 PPI 提示（含模态置信度与推理指导）"""
+        
         if not text_a:
             text_a = self.get_protein_text(seq_a)
         if not text_b:
@@ -176,11 +167,9 @@ class PPIPromptComposer:
 
 
 # ============================================================
-# PPIModel 主模型
 # ============================================================
 class PPIModel(nn.Module):
     """
-    PPI 预测模型 — 双蛋白质独立 SA-CMSA + CMON + 共享 Adapters，与 DTI 对齐。
     """
     
     def __init__(
@@ -195,7 +184,6 @@ class PPIModel(nn.Module):
         self.pred_dim = num_classes
         net_cfg = config.get("network", config)
         
-        # 消融
         ablation_str = net_cfg.get("ablation", "")
         self.ablation_flags = set(a.strip() for a in ablation_str.split(",") if a.strip())
         if "no_foldseek" in self.ablation_flags:
@@ -521,7 +509,6 @@ class PPIModel(nn.Module):
             struct_b, kg_b, b_3d_safe = feats_b
             b_kg_completed = comp_b[:, 1]
 
-        # ----- 4. Adapters -> tokens (与 DTI 对齐：validate → adapter → validate) -----
         struct_a = self._validate_tensor(struct_a, "struct_a")
         a_struct_tok = self.struct_adapter(struct_a, return_confidence=False)
         a_struct_tok = self._validate_tensor(a_struct_tok, "a_struct_tok")
@@ -706,7 +693,7 @@ def create_ppi_model(
     kge_bank: torch.Tensor = None,
     kge_keys: List[str] = None,
 ) -> PPIModel:
-    """创建 PPI 模型，kge_bank 为 tensor 时直接传入 SA-CMSA"""
+    
     if kge_bank is not None and not isinstance(kge_bank, torch.Tensor) and kge_keys is not None:
         import numpy as np
         if isinstance(kge_bank, dict):

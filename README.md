@@ -123,3 +123,31 @@ bash scripts/run_ablation.sh ppi SHS27k DFS
 ```
 
 Logs and checkpoints are written to `ckpts/`. If `CUDA_VISIBLE_DEVICES` is unset, the scripts use GPU 0.
+
+## Utilities
+
+These scripts are not part of training. They build caches that CMSA and CMON read, or they redraw figures.
+
+`precompute_tokenmol_dti.py` sits at the repository root. It turns DTI SMILES into TokenMol sequences with RDKit torsion angles and writes `cache/tokenmol_3d/tokenmol_3d_{dataset}.pkl`. DTI training loads that file for the moltoken branch. Datasets are `yamanishi08`, `bmkg_dti`, and `human`.
+
+```bash
+python precompute_tokenmol_dti.py --dataset yamanishi08
+python precompute_tokenmol_dti.py --all
+```
+
+`scripts/precompute_tokenmol_3d.py` does the same for MoleculeNet drug-property sets such as SIDER. `scripts/precompute_tokenmol_human.py` is the single-process Human DTI cache. `scripts/precompute_foldseek_dti.py` builds protein 3Di sequences for the protein branch (`esmfold`, `foldseek_api`, `from_pdb`, or `seq_approx`). `scripts/regenerate_ppi_dfs_split.py` rebuilds the PPI DFS split from the same deduplicated pairs that `PPIDataset` uses.
+
+`scripts/vis_sacmsa_heatmap.py`, `scripts/vis_cmon_radar.py`, and `scripts/vis_digest_attention.py` draw the CMSA retrieval, CMON reliability, and digest-attention figures from saved explanation files.
+
+## Updates
+
+This repository will keep changing. New code is committed on `main` and pushed again after each update. From the repository root:
+
+```bash
+export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0='*'
+git add -A
+git -c user.name='long11-jun' -c user.email='song15517965640@163.com' commit -m "Describe the change"
+git push origin main
+```
+
+The `export` line is only needed on this shared filesystem, where git otherwise refuses the directory. It does not change your git config. Do not commit weight files under `ckpts/` or the external asset directory.

@@ -172,10 +172,8 @@ class DDIPromptComposer:
 
 
 class DDIModel(nn.Module):
-    """
-    DDI 预测模型 — 双药物独立 SA-CMSA + CMON + 共享 Adapters，与 DTI/PPI 对齐。
-    """
-    
+    """Two drug branches, each with SA-CMSA and CMON, then a shared adapter."""
+
     def __init__(
         self,
         config: Dict[str, Any],

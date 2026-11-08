@@ -1,15 +1,13 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-预计算 Token-Mol 3D Torsion Tokens
-==================================
-一次性处理所有 SMILES，生成 3D 构象并提取扭转角 tokens，保存到缓存文件。
-之后训练时直接加载，无需重复计算。
+Build the TokenMol 3D torsion cache for MoleculeNet drug-property sets.
 
-用法：
+Writes cache/tokenmol_3d/tokenmol_3d_{dataset}.pkl. DP training loads this
+file for the moltoken modality.
+
     python scripts/precompute_tokenmol_3d.py --dataset SIDER
-    python scripts/precompute_tokenmol_3d.py --dataset Tox21
-    python scripts/precompute_tokenmol_3d.py --all  # 处理所有数据集
+    python scripts/precompute_tokenmol_3d.py --all
 """
 
 import os
@@ -24,16 +22,12 @@ import math
 import time
 import signal
 
-# 添加项目路径
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
-# 兼容仓库内部大量使用的 `from models...` 绝对导入（models 位于 unidrug/models）
 sys.path.insert(0, str(PROJECT_ROOT / "unidrug"))
 
 #
-# 注意：本脚本不依赖 numpy；如需后续统计再引入即可
 
-# RDKit 相关
 try:
     from rdkit import Chem
     from rdkit.Chem import AllChem
@@ -46,7 +40,6 @@ except ImportError:
 
 def _tokenmol_tokenize_smiles(smiles: str, vocab: Dict[str, int]) -> List[str]:
     """
-    与训练端 `DPDataset._tokenmol_tokenize_smiles` 保持一致：贪心最长匹配 Token-Mol 词表。
     """
     if not smiles or not vocab:
         return ["[UNK]"]
@@ -74,8 +67,6 @@ def _tokenmol_tokenize_smiles(smiles: str, vocab: Dict[str, int]) -> List[str]:
 
 def _torsion_bins_rad_strict(smiles: str, max_torsions: int = 32) -> Optional[List[str]]:
     """
-    严格 3D 扭转角提取：仅使用固定 randomSeed 的 ETKDGv3 生成构象，失败则返回 None（不做随机坐标 fallback）。
-    输出与训练端一致：[-3.14, 3.14] 的 0.01 rad 字符串（如 '1.23'）。
     """
     if not smiles:
         return None
@@ -85,12 +76,11 @@ def _torsion_bins_rad_strict(smiles: str, max_torsions: int = 32) -> Optional[Li
     mol = Chem.AddHs(mol)
 
     params = AllChem.ETKDGv3()
-    params.randomSeed = 42  # 固定 seed，保证可复现（但不做随机坐标 fallback）
+    params.randomSeed = 42
     cid = AllChem.EmbedMolecule(mol, params)
     if cid < 0 or mol.GetNumConformers() == 0:
         return None
 
-    # 轻量优化：优先 MMFF（更合理），失败再 UFF；迭代数收紧，避免极慢样本拖死
     try:
         AllChem.MMFFOptimizeMolecule(mol, maxIters=120)
     except Exception:
@@ -135,8 +125,6 @@ def build_tokenmol_seq_strict(
     smiles: str, vocab: Dict[str, int], use_torsion: bool, max_torsions: int
 ) -> Optional[str]:
     """
-    构造训练端一致的 `tokenmol_seq`（空格分隔字符串）。
-    严格模式：如果 use_torsion=True 且 3D 构象失败，则返回 None（明确失败，不做随机/降级）。
     """
     smi_tokens = _tokenmol_tokenize_smiles(smiles, vocab=vocab)
     tokens = list(smi_tokens)
@@ -151,17 +139,12 @@ def build_tokenmol_seq_strict(
 
 def get_torsion_tokens(smiles: str, num_torsion_bins: int = 36) -> Optional[List[str]]:
     """
-    从 SMILES 生成 3D 构象并提取扭转角 tokens
     
     Args:
-        smiles: 分子 SMILES
-        num_torsion_bins: 扭转角离散化的 bin 数量（默认 36，每 bin 10°）
     
     Returns:
         tokens: ['C', 'C', 'O', ..., 'GEO', 'TOR_0', 'TOR_90', ...]
-                如果失败返回 None
     """
-    # 旧接口保留但不使用：严谨模式下不再输出 TOR_*，改用 build_tokenmol_seq_strict
     return None
 
 
@@ -174,11 +157,10 @@ def _timeout_handler(signum, frame):
 
 
 def process_single_smiles(args) -> Tuple[int, str, Optional[str], float, Optional[str]]:
-    """处理单个 SMILES（用于多进程）。返回 (idx, smiles, seq_or_None, elapsed_sec, error_or_None)"""
+    
     idx, smiles, vocab, use_torsion, max_torsions, per_mol_timeout_sec, max_heavy_atoms = args
     t0 = time.time()
 
-    # 预筛：分子太大时 3D 构象会非常慢且不稳定 —— 直接标记失败更可控/可复现
     if max_heavy_atoms is not None and max_heavy_atoms > 0:
         try:
             mol0 = Chem.MolFromSmiles(smiles)
@@ -192,7 +174,6 @@ def process_single_smiles(args) -> Tuple[int, str, Optional[str], float, Optiona
     old_handler = None
     try:
         if per_mol_timeout_sec and per_mol_timeout_sec > 0:
-            # SIGALRM 仅在类 Unix 生效；本环境是 linux，OK
             old_handler = signal.signal(signal.SIGALRM, _timeout_handler)
             signal.alarm(int(per_mol_timeout_sec))
         seq = build_tokenmol_seq_strict(
@@ -225,25 +206,17 @@ def precompute_dataset(
     only_failed: bool = False,
 ):
     """
-    预计算一个数据集的所有 3D torsion tokens
     
     Args:
-        dataset_name: 数据集名称（SIDER, Tox21 等）
-        data_dir: 数据目录
-        output_dir: 输出目录
-        num_workers: 并行进程数
     """
-    # 查找数据文件
     dataset_path = Path(data_dir) / "dp" / "moleculenet" / dataset_name.lower()
     if not dataset_path.exists():
-        # 尝试其他路径
         dataset_path = Path(data_dir) / dataset_name.lower()
     
     if not dataset_path.exists():
         print(f"[ERROR] Dataset path not found: {dataset_path}")
         return
     
-    # 查找 CSV 文件：优先在 raw/ 子目录，其次在根目录
     csv_files = list((dataset_path / "raw").glob("*.csv")) if (dataset_path / "raw").exists() else []
     if not csv_files:
         csv_files = list(dataset_path.glob("*.csv"))
@@ -251,13 +224,11 @@ def precompute_dataset(
         print(f"[ERROR] No CSV files found in {dataset_path} or {dataset_path / 'raw'}")
         return
     
-    # 输出路径（用于 only_failed 模式下读取历史 cache/failed）
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
     cache_file = output_path / f"tokenmol_3d_{dataset_name.lower()}.pkl"
     failed_file = output_path / f"tokenmol_3d_{dataset_name.lower()}_failed.txt"
 
-    # 收集所有 SMILES（或只重试 failed）
     smiles_list: List[str] = []
     if only_failed:
         if not failed_file.exists():
@@ -265,7 +236,6 @@ def precompute_dataset(
             return
         with open(failed_file, "r") as f:
             smiles_list = [ln.strip() for ln in f if ln.strip()]
-        # 去重但保持顺序
         seen = set()
         smiles_list = [s for s in smiles_list if not (s in seen or seen.add(s))]
         print(f"[INFO] only_failed=True: loaded {len(smiles_list)} SMILES from {failed_file}")
@@ -286,7 +256,6 @@ def precompute_dataset(
             print("[ERROR] No SMILES found!")
             return
     
-    # 载入 Token-Mol 词表（必须与训练端一致，否则 token->id 映射会错位，3D/SMILES 信息会失真）
     vocab_file = (vocab_file or "").strip()
     if not vocab_file:
         default_vocab_candidates = [
@@ -299,13 +268,12 @@ def precompute_dataset(
                 break
     if not os.path.exists(vocab_file):
         print(f"[ERROR] Token-Mol vocab file not found: {vocab_file}")
-        print("[ERROR] 请通过 --vocab_file 指定正确的 Token-Mol 词表文件。")
+        print("[ERROR] Pass the TokenMol vocabulary with --vocab_file.")
         return
     from models.llm_encoder.tokenmol_tokenizer import TokenMolTokenizer
     tok = TokenMolTokenizer(vocab_file)
     vocab = tok.vocab
 
-    # 准备任务（严格：use_torsion=True；max_torsions 与训练端默认一致）
     use_torsion = True
     max_torsions = 32
     tasks = [
@@ -313,8 +281,6 @@ def precompute_dataset(
         for i, smi in enumerate(smiles_list)
     ]
     
-    # 多进程处理
-    # only_failed 模式下：优先加载已有 cache，再把成功的补上
     results = {}
     if only_failed and cache_file.exists():
         try:
@@ -345,7 +311,6 @@ def precompute_dataset(
                 else:
                     failed.append(smiles)
         except KeyboardInterrupt:
-            # 允许用户安全中断，避免 multiprocessing 内部异常噪声
             print("\n[WARN] Interrupted by user, terminating workers...")
             pool.terminate()
             pool.join()
@@ -368,20 +333,17 @@ def precompute_dataset(
     
     print(f"[INFO] Success: {len(results)}, Failed: {len(failed)}")
     
-    # 保存结果
     with open(cache_file, 'wb') as f:
         pickle.dump(results, f)
     
     print(f"[INFO] Saved to {cache_file}")
     print(f"[INFO] Cache size: {cache_file.stat().st_size / 1024:.1f} KB")
     
-    # 保存失败的 SMILES（用于调试）
     if failed:
         with open(failed_file, 'w') as f:
             f.write('\n'.join(failed))
         print(f"[INFO] Failed SMILES saved to {failed_file}")
 
-    # 保存慢样本（帮助定位“最后几条特别慢”的根因）
     if slow_cases:
         slow_cases.sort(key=lambda x: x[0], reverse=True)
         slow_file = output_path / f"tokenmol_3d_{dataset_name.lower()}_slow.txt"
@@ -438,7 +400,6 @@ def main():
         sys.exit(1)
     
     if args.all:
-        # 处理所有数据集
         datasets = ["SIDER", "Tox21", "ClinTox", "BBBP", "Bace", "HIV", "MUV"]
         for ds in datasets:
             print(f"\n{'='*60}")

@@ -49,12 +49,10 @@ class BaseCollator(ABC):
         if isinstance(data[0], Data):
             return Batch.from_data_list(data)
         elif torch.is_tensor(data[0]):
-            # 检查所有张量的形状是否一致
             shapes = [x.squeeze().shape for x in data]
             if len(set(shapes)) == 1:
                 return torch.stack([x.squeeze() for x in data])
             else:
-                # 如果形状不一致，使用padding或截断到相同维度
                 max_dims = [max(shape[i] for shape in shapes) for i in range(len(shapes[0]))]
                 padded_data = []
                 for x in data:
@@ -62,9 +60,7 @@ class BaseCollator(ABC):
                     if x_squeezed.shape == tuple(max_dims):
                         padded_data.append(x_squeezed)
                     else:
-                        # 创建零填充张量
                         padded = torch.zeros(max_dims, dtype=x_squeezed.dtype, device=x_squeezed.device)
-                        # 将原始数据复制到填充张量的左上角
                         slices = tuple(slice(0, min(s, max_dims[i])) for i, s in enumerate(x_squeezed.shape))
                         padded[slices] = x_squeezed
                         padded_data.append(padded)
@@ -120,8 +116,6 @@ class MolCollator(BaseCollator):
             for modality in self.config["modality"]:
                 batch[modality] = self._collate_single([mol[modality] for mol in mols], self.config["featurizer"][modality])
 
-            # 兼容：允许样本 dict 里携带额外字段（例如 tokenmol_seq），并在这里一起打包进 batch
-            # 这些字段不属于 modality 列表，因此需要显式拷贝出来
             extra_keys = set(mols[0].keys()) - set(self.config["modality"])
             for k in sorted(extra_keys):
                 vals = [mol.get(k, "") for mol in mols]

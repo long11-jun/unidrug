@@ -1,146 +1,105 @@
 {
-  "model": "ppi",
-  "_comment": "PPIModel - 完整复用 DTI 蛋白质支路架构",
-  "_version": "2.1",
-  "_architecture": "PPI = DTI蛋白质支路 × 2 (与 DDI = DP药物支路 × 2 对称)",
-
-  "_note_data": "===== 数据配置（蛋白质三模态：Structure + KG + Text）=====",
-  "data": {
-    "protein": {
-      "modality": ["structure", "kg", "text"],
-      "_note_modality": "蛋白质三模态，与 DTI 蛋白质侧一致",
-      "featurizer": {
-        "structure": {
-          "name": "index",
-          "max_len": 1200,
-          "_note": "氨基酸序列转索引，送入 DeepMCNN"
-        },
-        "kg": {
-          "name": "KGE",
-          "kg_name": "BMKG",
-          "kg_path": "{asset_root}/assets/kg/BMKG/",
-          "save_path": "{asset_root}/assets/kg/BMKG/kge",
-          "kge_file": "embedding.pkl",
-          "embed_dim": 256,
-          "_note": "与 DTI 蛋白质侧 KG 配置完全一致"
-        },
-        "text": {
-          "name": "RawString",
-          "max_length": 512,
-          "_note": "蛋白质功能描述文本"
+    "model": "ppi",
+    "_version": "2.1",
+    "_architecture": "PPI uses two protein branches. DDI uses two drug branches.",
+    "data": {
+        "protein": {
+            "modality": [
+                "structure",
+                "kg",
+                "text"
+            ],
+            "featurizer": {
+                "structure": {
+                    "name": "index",
+                    "max_len": 1200
+                },
+                "kg": {
+                    "name": "KGE",
+                    "kg_name": "BMKG",
+                    "kg_path": "{asset_root}/assets/kg/BMKG/",
+                    "save_path": "{asset_root}/assets/kg/BMKG/kge",
+                    "kge_file": "embedding.pkl",
+                    "embed_dim": 256
+                },
+                "text": {
+                    "name": "RawString",
+                    "max_length": 512
+                }
+            }
         }
-      }
+    },
+    "network": {
+        "protein": {
+            "structure": {
+                "name": "DeepMCNN",
+                "vocab_size": 26,
+                "embedding_num": 128,
+                "hidden_size": 128,
+                "output_size": 256,
+                "dropout": 0.1
+            },
+            "kg": {
+                "embedding_dim": 256
+            }
+        },
+        "llm": {
+            "name": "qwen",
+            "model_name": "{asset_root}/qwen2.5-3b-instruct",
+            "max_length": 512,
+            "device": "cuda:0",
+            "torch_dtype": "bfloat16"
+        },
+        "kg_path": "{asset_root}/assets/kg/BMKG",
+        "kg_dim": 256,
+        "use_text": true,
+        "protein_text_path": null,
+        "use_foldseek": false,
+        "prot_3d_mode": "property",
+        "foldseek": {
+            "embedding_dim": 128,
+            "hidden_dim": 128,
+            "output_dim": 256,
+            "max_length": 1500,
+            "dropout": 0.1
+        },
+        "adapter_dropout": 0.25,
+        "num_struct_tokens": 40,
+        "num_kg_tokens": 28,
+        "num_3d_tokens": 32,
+        "use_lora": true,
+        "lora_rank": 32,
+        "lora_alpha": 64,
+        "lora_dropout": 0.15,
+        "head_dropout": 0.15,
+        "use_feature_noise": true,
+        "feature_noise_std": 0.02,
+        "use_attention_pooling": true,
+        "pooling_dropout": 0.12,
+        "stability": {
+            "logits_clamp_abs": 10.0
+        },
+        "num_classes": 7,
+        "multilabel": true,
+        "cmsa": {
+            "enabled": true,
+            "sub_dim": 128,
+            "topk": 16,
+            "num_heads": 2,
+            "dropout": 0.1,
+            "align_lambda": 0.05,
+            "retrieve_lambda": 0.1
+        },
+        "mars": {
+            "enabled": true,
+            "sub_dim": 64
+        },
+        "_ablation_options": {
+            "no_cmsa": "Disable SA-CMSA knowledge-graph completion",
+            "no_cmon": "Disable CMON orthogonal decomposition",
+            "no_cmsa,no_cmon": "Disable both SA-CMSA and CMON",
+            "no_foldseek": "Disable the 3D protein modality",
+            "_usage": "Pass a comma-separated list through the ABLATION variable"
+        }
     }
-  },
-
-  "_note_network": "===== 网络配置（与 DTI 架构对齐）=====",
-  "network": {
-    "protein": {
-      "structure": {
-        "name": "DeepMCNN",
-        "vocab_size": 26,
-        "embedding_num": 128,
-        "hidden_size": 128,
-        "output_size": 256,
-        "dropout": 0.1,
-        "_note": "与 DTI 蛋白质结构编码器完全一致"
-      },
-      "kg": {
-        "embedding_dim": 256,
-        "_note": "与 DTI 蛋白质 KG 维度一致"
-      }
-    },
-
-    "_comment_llm": "=== LLM 配置（与 DTI/DDI/DP 一致）===",
-    "llm": {
-      "name": "qwen",
-      "model_name": "{asset_root}/qwen2.5-3b-instruct",
-      "max_length": 512,
-      "device": "cuda:0",
-      "torch_dtype": "bfloat16"
-    },
-
-    "_comment_kg": "=== KG 配置（与 DTI 一致）===",
-    "kg_path": "{asset_root}/assets/kg/BMKG",
-    "kg_dim": 256,
-
-    "_comment_text": "=== Text 配置（文本提取优先级）===",
-    "use_text": true,
-    "protein_text_path": null,
-    "_note_text": "优先从数据集目录加载文本，其次从 KG 加载，最后从序列生成",
-
-    "_comment_3d": "=== 蛋白质3D模态（PropertyEncoder 或 FoldSeek）===",
-    "use_foldseek": false,
-    "prot_3d_mode": "property",
-    "_note_3d": "默认 property 模式（理化性质编码，无需外部3D数据），可切换 foldseek",
-    "foldseek": {
-      "embedding_dim": 128,
-      "hidden_dim": 128,
-      "output_dim": 256,
-      "max_length": 1500,
-      "dropout": 0.1,
-      "_note": "与 DTI 蛋白质 FoldSeek 配置一致"
-    },
-
-    "_comment_adapters": "=== Adapter 配置（与DTI蛋白质侧一致）===",
-    "adapter_dropout": 0.25,
-    "num_struct_tokens": 40,
-    "num_kg_tokens": 28,
-    "num_3d_tokens": 32,
-    "_note_tokens": "每个蛋白质：Structure 40 + KG 28 + 3D 32 = 100 tokens",
-
-    "_comment_regularization": "=== 正则化配置 ===",
-    "use_lora": true,
-    "lora_rank": 32,
-    "lora_alpha": 64,
-    "lora_dropout": 0.15,
-    "head_dropout": 0.15,
-
-    "_comment_noise": "=== Feature Noise（与DTI一致）===",
-    "use_feature_noise": true,
-    "feature_noise_std": 0.02,
-
-    "_comment_pooling": "=== Pooling 配置（与 DTI 一致）===",
-    "use_attention_pooling": true,
-    "pooling_dropout": 0.12,
-
-    "_comment_stability": "=== 训练稳定性配置（与 DTI 一致）===",
-    "stability": {
-      "logits_clamp_abs": 10.0,
-      "_note": "logits 裁剪范围"
-    },
-
-    "_comment_ppi_specific": "=== PPI 特有配置 ===",
-    "num_classes": 7,
-    "multilabel": true,
-    "_note_classes": "PPI 是 7 类多标签任务 (reaction, binding, ptmod, activation, inhibition, catalysis, expression)",
-
-    "_comment_cmsa": "SA-CMSA",
-    "cmsa": {
-      "enabled": true,
-      "sub_dim": 128,
-      "topk": 16,
-      "num_heads": 2,
-      "dropout": 0.1,
-      "align_lambda": 0.05,
-      "retrieve_lambda": 0.1,
-      "_note": "Prot A 和 Prot B 各自独立实例（与 DTI drug/prot 对齐）"
-    },
-
-    "_comment_cmon": "CMON",
-    "mars": {
-      "enabled": true,
-      "sub_dim": 64,
-      "_note": "Prot A 和 Prot B 各自独立实例（与 DTI drug/prot 对齐）"
-    },
-
-    "_comment_ablation": "=== 消融实验指南 ===",
-    "_ablation_options": {
-      "no_cmsa": "关闭 SA-CMSA（KG 补全模块）",
-      "no_cmon": "关闭 CMON（正交分解模块）",
-      "no_cmsa,no_cmon": "同时关闭 SA-CMSA 和 CMON",
-      "no_foldseek": "关闭 3D 模态（PropertyEncoder / FoldSeek）",
-      "_usage": "在 shell 脚本中通过 ABLATION 参数传入，逗号分隔"
-    }
-  }
 }

@@ -1,18 +1,9 @@
 """
-LLM-based PPI (Protein-Protein Interaction) 预测任务
-复用蛋白质多模态编码能力
 
-蛋白质模态架构：
 - Structure (CNN / ESM-2)
-- KG (KGE + 补全)
-- Text (蛋白质描述)
 
-任务类型：7 分类（多标签）
 - reaction, binding, ptmod, activation, inhibition, catalysis, expression
 
-评估指标：
-- 多标签：AUROC, AUPR, F1 (micro/macro)
-- 单标签：Accuracy, AUROC, AUPR, F1
 """
 
 import argparse
@@ -57,7 +48,7 @@ logger.propagate = False
 
 
 def move_to_device(data, device):
-    """递归移动数据到 device"""
+    
     if isinstance(data, dict):
         return {k: move_to_device(v, device) for k, v in data.items()}
     if isinstance(data, torch.Tensor):
@@ -135,7 +126,7 @@ class EarlyStopping:
 
 
 def compute_metrics_multilabel(labels: np.ndarray, probs: np.ndarray, num_classes: int = 7) -> Dict[str, float]:
-    """计算多标签评估指标（含最优阈值搜索，与 DTI 评估对齐）"""
+    
     try:
         auroc_micro = roc_auc_score(labels, probs, average="micro")
         auroc_macro = roc_auc_score(labels, probs, average="macro")
@@ -152,7 +143,6 @@ def compute_metrics_multilabel(labels: np.ndarray, probs: np.ndarray, num_classe
         aupr_micro = 0.1
         aupr_macro = 0.1
     
-    # 全局最优阈值搜索（与 DTI 对齐）
     best_f1_micro, best_thresh = 0.0, 0.5
     for thresh in np.arange(0.1, 0.9, 0.05):
         preds_t = (probs > thresh).astype(int)
@@ -164,7 +154,6 @@ def compute_metrics_multilabel(labels: np.ndarray, probs: np.ndarray, num_classe
     preds_best = (probs > best_thresh).astype(int)
     best_f1_macro = f1_score(labels, preds_best, average="macro", zero_division=0)
 
-    # 也报告 0.5 阈值的 F1 用于基线对比
     preds_05 = (probs > 0.5).astype(int)
     f1_micro_05 = f1_score(labels, preds_05, average="micro", zero_division=0)
     
@@ -181,7 +170,7 @@ def compute_metrics_multilabel(labels: np.ndarray, probs: np.ndarray, num_classe
 
 
 def compute_metrics_singlelabel(labels: np.ndarray, probs: np.ndarray, num_classes: int = 7) -> Dict[str, float]:
-    """计算单标签评估指标"""
+    
     preds = np.argmax(probs, axis=1)
     accuracy = accuracy_score(labels, preds)
     f1_macro = f1_score(labels, preds, average="macro", zero_division=0)
@@ -208,11 +197,9 @@ def compute_metrics_singlelabel(labels: np.ndarray, probs: np.ndarray, num_class
 
 def load_kge_embedding(config: Dict) -> Tuple[Optional[torch.Tensor], Optional[List[str]]]:
     """
-    加载 KGE 嵌入
     
     Returns:
         kge_bank: tensor [N, dim]
-        kge_keys: entity_id 列表
     """
     kg_cfg = config.get("data", {}).get("protein", {}).get("featurizer", {}).get("kg", {})
     kg_path = kg_cfg.get("kg_path")
@@ -232,7 +219,6 @@ def load_kge_embedding(config: Dict) -> Tuple[Optional[torch.Tensor], Optional[L
             kge_data = pickle.load(f)
         
         if isinstance(kge_data, dict):
-            # 筛选蛋白质实体（以 'P' 开头或不以 'D' 开头）
             keys = sorted([k for k in kge_data.keys() if isinstance(k, str) and k and k[0] != "D"])
             if not keys:
                 keys = sorted([k for k in kge_data.keys() if isinstance(k, str)])
@@ -251,7 +237,7 @@ def load_kge_embedding(config: Dict) -> Tuple[Optional[torch.Tensor], Optional[L
 
 
 def train_epoch(model, train_loader, optimizer, scheduler, args, device, epoch, pos_weight=None):
-    """训练一个 epoch：辅助损失权重(CL/CMSA/CMON)、SA-CMSA/CMON 诊断、KG explain、AMP、NaN 保护"""
+    
     model.train()
     use_amp = True
     amp_dtype = torch.bfloat16
@@ -427,7 +413,7 @@ def train_epoch(model, train_loader, optimizer, scheduler, args, device, epoch, 
 
 @torch.no_grad()
 def evaluate(model, eval_loader, device, args):
-    """评估模型"""
+    
     model.eval()
     all_labels = []
     all_probs = []
@@ -510,7 +496,6 @@ def main():
     logger.info(f"Multilabel: {args.multilabel}")
     logger.info(f"="*70)
     
-    # 加载配置
     with open(args.config_path, "r") as f:
         from utils.paths import expand_asset_paths
         config = expand_asset_paths(json.load(f))
@@ -551,7 +536,6 @@ def main():
         
         set_seed(seed)
         
-        # 加载数据集
         logger.info(f"Loading datasets (split_method={args.split_method})...")
         train_dataset = get_ppi_dataset(
             args.dataset_name, args.dataset_path, config,
@@ -564,16 +548,13 @@ def main():
         
         logger.info(f"Train: {len(train_dataset)}, Test: {len(test_dataset)}")
         
-        # 加载 KGE embedding
         logger.info("Loading KGE embeddings...")
         kge_bank, kge_keys = load_kge_embedding(config)
         
-        # 获取 KG 维度
         kg_dim = config.get("data", {}).get("protein", {}).get("featurizer", {}).get("kg", {}).get("kge_dim", 256)
         if kge_bank is not None:
             kg_dim = kge_bank.shape[-1]
         
-        # 包装数据集（添加多模态特征提取）
         logger.info("Wrapping datasets with multi-modal featurizer...")
         max_seq_len = config.get("data", {}).get("protein", {}).get("featurizer", {}).get("structure", {}).get("max_len", 1000)
         
@@ -588,7 +569,6 @@ def main():
             max_seq_len=max_seq_len
         )
         
-        # 创建 Collator（使用多模态 Collator）
         ppi_collator = PPICollator(multilabel=args.multilabel, kg_dim=kg_dim)
         
         # DataLoader
@@ -603,7 +583,6 @@ def main():
             pin_memory=True,
         )
         
-        # ===== 计算 pos_weight：解决多标签类别不平衡（PPI 每类正样本率 ~14%）=====
         pos_weight = None
         if args.multilabel:
             logger.info("Computing per-class pos_weight from training data...")
@@ -619,7 +598,6 @@ def main():
             logger.info(f"  Per-class positive rate: {[f'{r:.3f}' for r in pos_rate.tolist()]}")
             logger.info(f"  pos_weight (raw→capped@3): {[f'{r:.1f}→{c:.1f}' for r, c in zip(raw_pw.tolist(), pos_weight.tolist())]}")
         
-        # 创建模型
         logger.info("Creating model...")
         model = create_ppi_model(
             config=config,
@@ -631,7 +609,6 @@ def main():
                      f"3d={model.prot_3d_dim} (mode={model.prot_3d_mode})")
         logger.info(f"[PPI] 3D encoder: {type(model.prot_3d_encoder).__name__ if model.prot_3d_encoder else 'None'}")
 
-        # ===== 初始化分类头 bias：从先验正样本率出发，而非 sigmoid(0)=0.5 =====
         if args.multilabel and pos_weight is not None:
             with torch.no_grad():
                 prior_bias = -torch.log(pos_weight)
@@ -644,7 +621,6 @@ def main():
         trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
         logger.info(f"Total params: {total_params/1e6:.2f}M, Trainable: {trainable_params/1e6:.2f}M")
         
-        # 优化器
         optimizer = torch.optim.AdamW(
             [p for p in model.parameters() if p.requires_grad],
             lr=args.lr,
@@ -652,7 +628,6 @@ def main():
             betas=(0.9, 0.999),
         )
         
-        # 学习率调度器
         total_steps = len(train_loader) * args.epochs // args.accumulation_steps
         warmup_steps = int(total_steps * args.warmup_ratio)
         
@@ -664,7 +639,6 @@ def main():
         
         scheduler = LambdaLR(optimizer, lr_lambda)
         
-        # Early Stopping（以测试集 F1 为准，与基线对比指标一致）
         metric_key = "F1_micro" if args.multilabel else "F1_macro"
         stopper = EarlyStopping(mode="higher", patience=args.patience, filename=args.output_path)
         
@@ -675,7 +649,6 @@ def main():
         logger.info(f"  Total steps: {total_steps}, Warmup: {warmup_steps}")
         logger.info(f"  Early Stopping: based on TEST set {metric_key} (patience={args.patience})")
         
-        # 训练循环
         for epoch in range(args.epochs):
             logger.info(f"\n--- Epoch {epoch + 1}/{args.epochs} ---")
             
@@ -702,7 +675,6 @@ def main():
                 logger.info(f"Early stopping at epoch {epoch + 1}")
                 break
         
-        # 加载最佳模型
         logger.info("\nLoading best model for final evaluation...")
         checkpoint = torch.load(args.output_path)
         model.load_state_dict(checkpoint["model_state_dict"])
@@ -716,7 +688,6 @@ def main():
         
         all_results.append(final_metrics)
     
-    # 汇总结果
     if len(all_results) > 1:
         logger.info(f"\n{'='*60}")
         logger.info(f"Ensemble Results ({len(seeds)} seeds):")

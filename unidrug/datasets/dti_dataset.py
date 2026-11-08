@@ -44,14 +44,12 @@ class DTIDataset(Dataset, ABC):
 
     def _build(self, eval_pair_index, save_path, train_pair_index=None, strict_cold_start=False):
         # build after train / test datasets are determined for filtering out edges
-        # strict_cold_start: 将测试集独有实体的 KGE 置零，模拟真正的知识冷启动
         if len(self.config["drug"]["modality"]) > 1:
             kg_config = self.config["drug"]["featurizer"]["kg"]
             self.kg = SUPPORTED_KG[kg_config["kg_name"]](kg_config["kg_path"])
             self.drug2kg, self.drug2text, self.protein2kg, self.protein2text = self.kg.link(self)
             self.concat_text_first = self.config["concat_text_first"]
             
-            # 【优化】优先使用本地 JSON 的文本（数据集自带，更匹配）
             local_drug_count = 0
             local_prot_count = 0
             if hasattr(self, 'local_drug2text'):
@@ -67,12 +65,10 @@ class DTIDataset(Dataset, ABC):
             if local_drug_count > 0 or local_prot_count > 0:
                 logger.info(f"[Text] Used local texts: {local_drug_count} drugs, {local_prot_count} proteins")
             
-            # 【优化】优先使用预训练的 embedding.pkl（与 DP 一致）
             kge = None
             if kg_config["kg_name"] == "BMKG":
                 kg_base_path = kg_config.get("kg_path", "")
                 
-                # 1. 优先使用 embedding.pkl（预训练语义嵌入）
                 embedding_path = os.path.join(kg_base_path, "embedding.pkl")
                 if os.path.exists(embedding_path):
                     import pickle
@@ -81,7 +77,6 @@ class DTIDataset(Dataset, ABC):
                         kge = pickle.load(f)
                     logger.info(f"Loaded KGE with {len(kge)} entities (pre-trained)")
                 else:
-                    # 2. 检查是否有缓存的 KGE
                     if os.path.exists(save_path):
                         import pickle
                         logger.info(f"Loading cached KGE from {save_path}")
@@ -89,7 +84,6 @@ class DTIDataset(Dataset, ABC):
                             kge = pickle.load(f)
                         logger.info(f"Loaded cached KGE with {len(kge)} entities")
                     else:
-                        # 3. Fallback: 使用 ProNE 生成（需要 cogdl）
                         logger.warning(f"Pre-trained KGE not found, generating with ProNE...")
                         filter_out = []
                         for i_drug, i_protein in eval_pair_index:
@@ -101,7 +95,6 @@ class DTIDataset(Dataset, ABC):
                                     save=True, save_path=save_path)
                         logger.info(f"ProNE KGE has {len(kge)} entities")
             else:
-                # 非 BMKG，使用原有逻辑
                 filter_out = []
                 for i_drug, i_protein in eval_pair_index:
                     smi = self.smiles[i_drug]
@@ -112,42 +105,31 @@ class DTIDataset(Dataset, ABC):
                             save=True, save_path=save_path)
             
             # ============================================================
-            # 严格冷启动：将测试集独有实体的 KGE 置零
             # ============================================================
-            # 原理：embedding.pkl 是在完整 KG 上预训练的，包含了 drug-protein 交互边的信息。
-            # 在 cold_drug/cold_protein/cold_cluster 场景下，测试实体的 KGE 可能间接编码了
-            # 与测试交互相关的拓扑信息。严格冷启动将这些实体的 KGE 置零，
-            # 迫使模型通过 SparseAttentionKGCompletion（基于结构特征的补全）来推理。
             #
-            # 这模拟了真实场景：对于完全未知的新药物/新靶点，KG 中没有任何相关信息。
             # ============================================================
             if strict_cold_start and kge is not None and train_pair_index is not None:
-                # 收集训练集中出现的药物和蛋白质
                 train_drugs = set()
                 train_proteins = set()
                 for i_drug, i_protein in train_pair_index:
                     train_drugs.add(self.smiles[i_drug])
                     train_proteins.add(self.proteins[i_protein])
                 
-                # 收集测试集中出现的药物和蛋白质
                 test_drugs = set()
                 test_proteins = set()
                 for i_drug, i_protein in eval_pair_index:
                     test_drugs.add(self.smiles[i_drug])
                     test_proteins.add(self.proteins[i_protein])
                 
-                # 冷启动实体 = 只在测试集中出现、不在训练集中出现的实体
                 cold_drugs = test_drugs - train_drugs
                 cold_proteins = test_proteins - train_proteins
                 
-                # 获取 embedding 维度
                 embed_dim = kg_config.get("embed_dim", 256)
                 if kge:
                     sample_val = next(iter(kge.values()))
                     if hasattr(sample_val, 'shape'):
                         embed_dim = sample_val.shape[0]
                 
-                # 将冷启动实体的 KGE 置零
                 zeroed_drugs = 0
                 for smi in cold_drugs:
                     if smi in self.drug2kg:
@@ -165,7 +147,7 @@ class DTIDataset(Dataset, ABC):
                             zeroed_proteins += 1
                 
                 print(f"\n{'='*60}")
-                print(f"[STRICT COLD START] 严格冷启动 KGE 过滤完成")
+                print("[STRICT COLD START] Held-out entity KGE vectors were zeroed")
                 print(f"  Cold drugs:    {len(cold_drugs)} (zeroed KGE: {zeroed_drugs}/{len(cold_drugs)})")
                 print(f"  Cold proteins: {len(cold_proteins)} (zeroed KGE: {zeroed_proteins}/{len(cold_proteins)})")
                 print(f"  Train drugs:   {len(train_drugs)}, Train proteins: {len(train_proteins)}")
@@ -196,8 +178,6 @@ class DTIDataset(Dataset, ABC):
         new_dataset.pair_index = [self.pair_index[i] for i in indexes]
         new_dataset.labels = [self.labels[i] for i in indexes]
         
-        # 【关键修复】同步索引 featurized_drugs 和 featurized_proteins
-        # 确保特征和标签对应！
         if hasattr(self, 'featurized_drugs') and self.featurized_drugs:
             new_dataset.featurized_drugs = [self.featurized_drugs[i] for i in indexes]
         if hasattr(self, 'featurized_proteins') and self.featurized_proteins:
@@ -267,25 +247,20 @@ class DTIDataset(Dataset, ABC):
                 processed_drug = self.drug_featurizer(drug_smi)
                 processed_protein = self.protein_featurizer(protein_seq)
             
-            # 保存 SMILES 用于 MolToken 编码
             processed_drug["smiles"] = drug_smi
             
-            # 【关键修复】保存蛋白质序列用于 prompt 生成
             processed_protein["sequence"] = protein_seq
             
             self.featurized_drugs.append(processed_drug)
             self.featurized_proteins.append(processed_protein)
         
-        # ===== 加载预计算的 MolToken（与 DP 一致）=====
         self._load_tokenmol_cache()
-        # ===== 加载预计算的 FoldSeek 3Di 序列 =====
         self._load_foldseek_cache()
     
     def _load_tokenmol_cache(self):
-        """加载预计算的 MolToken 3D 缓存"""
+        
         import pickle
         
-        # 获取数据集名称
         dataset_name = self.__class__.__name__.lower()
         if dataset_name == "yamanishi08":
             dataset_name = "yamanishi08"
@@ -294,16 +269,15 @@ class DTIDataset(Dataset, ABC):
         elif dataset_name == "human":
             dataset_name = "human"
         
-        # 查找缓存文件
         repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         cache_dir = os.path.join(repo_root, "cache", "tokenmol_3d")
         cache_file = os.path.join(cache_dir, f"tokenmol_3d_{dataset_name}.pkl")
         
-        print(f"\n[DTI MolToken] Looking for cache: {cache_file}")  # 直接 print 避免被覆盖
+        print(f"\n[DTI MolToken] Looking for cache: {cache_file}")
         
         if not os.path.exists(cache_file):
             print(f"[DTI MolToken]  Cache NOT FOUND: {cache_file}")
-            print(f"[DTI MolToken] Run: python scripts/precompute_tokenmol_dti.py --dataset {dataset_name}")
+            print(f"[DTI MolToken] Run: python precompute_tokenmol_dti.py --dataset {dataset_name}")
             logger.warning(f"[DTI MolToken] Cache not found: {cache_file}")
             return
         
@@ -324,7 +298,6 @@ class DTIDataset(Dataset, ABC):
                         self.featurized_drugs[i]["tokenmol_seq"] = tokens
                     hit += 1
                 else:
-                    # 未命中时使用 SMILES 本身作为 fallback
                     self.featurized_drugs[i]["tokenmol_seq"] = smi
                     miss += 1
             
@@ -335,7 +308,7 @@ class DTIDataset(Dataset, ABC):
             logger.warning(f"[DTI MolToken] Cache loading failed: {e}")
 
     def _load_foldseek_cache(self):
-        """加载预计算的 FoldSeek 3Di 序列缓存"""
+        
         import pickle
         
         dataset_name = self.__class__.__name__.lower()
@@ -419,7 +392,7 @@ class DTIClassificationDataset(DTIDataset):
                 })
         elif self.split_strategy == "cold_cluster":
             self.folds = cold_cluster_split(self, 3)
-            self.nfolds = len(self.folds)  # 动态确定 fold 数量（跳过无效 fold 后）
+            self.nfolds = len(self.folds)
             logger.info(f"[cold_cluster] nfolds={self.nfolds} (some may have been skipped)")
 
 
@@ -428,12 +401,10 @@ class Yamanishi08(DTIClassificationDataset):
         super(Yamanishi08, self).__init__(path, config, split_strategy)
 
     def _load_data(self):
-        # 加载药物数据（包含 SMILES 和 text）
         drug_data = json.load(open(os.path.join(self.path, "drug.json")))
         self.smiles = [drug_data[item]["SMILES"] for item in drug_data]
         drugsmi2index = dict(zip(self.smiles, range(len(self.smiles))))
         
-        # 【优化】从本地 JSON 提取药物文本（优先于 BMKG）
         self.local_drug2text = {}
         for item in drug_data:
             smi = drug_data[item]["SMILES"]
@@ -441,12 +412,10 @@ class Yamanishi08(DTIClassificationDataset):
             if text:
                 self.local_drug2text[smi] = text
 
-        # 加载蛋白质数据（包含 sequence 和 text）
         prot_data = json.load(open(os.path.join(self.path, "protein.json")))
         self.proteins = [prot_data[item]["sequence"] for item in prot_data]
         proteinseq2index = dict(zip(self.proteins, range(len(self.proteins))))
         
-        # 【优化】从本地 JSON 提取蛋白质文本（优先于 BMKG）
         self.local_protein2text = {}
         for item in prot_data:
             seq = prot_data[item]["sequence"]
@@ -473,13 +442,11 @@ class BMKG_DTI(DTIClassificationDataset):
         super(BMKG_DTI, self).__init__(path, config, split_strategy)
 
     def _load_data(self):
-        # 加载药物数据（包含 SMILES 和 text）
         drug_data = json.load(open(os.path.join(self.path, "drug.json")))
         self.drug_keys = [item for item in drug_data]
         self.smiles = [drug_data[item]["SMILES"] for item in drug_data]
         self.drugid2index = dict(zip(drug_data.keys(), range(len(self.smiles))))
         
-        # 【优化】从本地 JSON 提取药物文本
         self.local_drug2text = {}
         for item in drug_data:
             smi = drug_data[item]["SMILES"]
@@ -487,13 +454,11 @@ class BMKG_DTI(DTIClassificationDataset):
             if text:
                 self.local_drug2text[smi] = text
 
-        # 加载蛋白质数据（包含 sequence 和 text）
         prot_data = json.load(open(os.path.join(self.path, "protein.json")))
         self.prot_keys = [item for item in prot_data]
         self.proteins = [prot_data[item]["sequence"] for item in prot_data]
         self.proteinid2index = dict(zip(prot_data.keys(), range(len(self.proteins))))
         
-        # 【优化】从本地 JSON 提取蛋白质文本
         self.local_protein2text = {}
         for item in prot_data:
             seq = prot_data[item]["sequence"]
@@ -510,7 +475,6 @@ class BMKG_DTI(DTIClassificationDataset):
             drug_id = row["drug_id"]
             prot_id = str(row["protein_id"])
             
-            # 跳过缺失的药物或蛋白质
             if drug_id not in self.drugid2index:
                 skipped += 1
                 continue
@@ -568,25 +532,19 @@ class MSSL2drug(DTIClassificationDataset):
 class Human(DTIClassificationDataset):
     """Human DTI dataset with pre-defined train/val/test splits.
     
-    数据格式：train.csv, val.csv, test.csv
-    每个文件包含: SMILES, Protein, Y (0/1)
     """
     def __init__(self, path, config, split_strategy):
-        # Human 数据集已预划分，只支持 warm 策略
         if split_strategy != "warm":
             logger.warning(f"Human dataset only supports 'warm' split (pre-defined), ignoring '{split_strategy}'")
         super(Human, self).__init__(path, config, "warm")
 
     def _load_data(self):
-        # 加载所有三个文件
         train_df = pd.read_csv(os.path.join(self.path, "train.csv"))
         val_df = pd.read_csv(os.path.join(self.path, "val.csv"))
         test_df = pd.read_csv(os.path.join(self.path, "test.csv"))
         
-        # 合并获取所有唯一的 SMILES 和蛋白质
         all_df = pd.concat([train_df, val_df, test_df], ignore_index=True)
         
-        # 构建唯一的 SMILES 和蛋白质列表
         unique_smiles = all_df["SMILES"].unique().tolist()
         unique_proteins = all_df["Protein"].unique().tolist()
         
@@ -596,7 +554,6 @@ class Human(DTIClassificationDataset):
         drugsmi2index = {smi: idx for idx, smi in enumerate(self.smiles)}
         proteinseq2index = {seq: idx for idx, seq in enumerate(self.proteins)}
         
-        # 构建 pair_index 和 labels
         self.pair_index = []
         self.labels = []
         
@@ -606,12 +563,10 @@ class Human(DTIClassificationDataset):
             self.pair_index.append((drug_idx, prot_idx))
             self.labels.append(int(row["Y"]))
         
-        # 存储预定义的划分索引
         self.train_size = len(train_df)
         self.val_size = len(val_df)
         self.test_size = len(test_df)
         
-        # 无本地文本（Human 数据集只有 SMILES 和序列）
         self.local_drug2text = {}
         self.local_protein2text = {}
         
@@ -622,16 +577,15 @@ class Human(DTIClassificationDataset):
         logger.info(f"  Positive ratio: {sum(self.labels)/len(self.labels):.2%}")
 
     def _train_test_split(self):
-        """Human 数据集使用预定义划分，只有 1 折"""
+        
         train_indices = list(range(self.train_size))
         val_indices = list(range(self.train_size, self.train_size + self.val_size))
         test_indices = list(range(self.train_size + self.val_size, len(self)))
         
-        # 使用 train+val 作为训练，test 作为测试
         self.folds = [{
-            "train": train_indices + val_indices,  # 训练 + 验证 合并
-            "val": val_indices,                     # 单独的验证集
-            "test": test_indices                    # 测试集
+            "train": train_indices + val_indices,
+            "val": val_indices,
+            "test": test_indices
         }]
         self.nfolds = 1
         logger.info(f"[Human] Pre-defined split: train={len(train_indices)}, val={len(val_indices)}, test={len(test_indices)}")

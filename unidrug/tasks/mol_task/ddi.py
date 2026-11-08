@@ -1,20 +1,8 @@
 """
-LLM-based DDI (Drug-Drug Interaction) 预测任务
-完整复用 DP 框架的四模态编码能力
 
-四模态架构：
 - Structure (GraphMVP)
-- KG (KGE + 补全)
-- Text (KG关系/药物描述)
-- MolToken (化学语义)
 
-三种场景：
-- S1: UnseenDDIs - 未见 DDI 组合（药物见过）
-- S2: Unseendrugs (onedrug) - 未见单药物
-- S3: Unseendrugs (twodrugs) - 未见双药物
 
-任务类型：4 分类 (DDI 类型 0, 1, 2, 3)
-评估指标：Accuracy, AUROC, AUPR, F1
 """
 
 import argparse
@@ -121,8 +109,6 @@ class EarlyStopping:
 
 class DDIDatasetWithFeaturizer(Dataset):
     """
-    DDI 数据集包装器，支持多模态特征提取
-    支持预计算的 TokenMol 3D 扭转角缓存
     """
     def __init__(
         self,
@@ -136,7 +122,6 @@ class DDIDatasetWithFeaturizer(Dataset):
         self.cache_features = cache_features
         self.cache = {}
         
-        # 加载预计算的 TokenMol 3D 缓存
         self.tokenmol_cache = {}
         if tokenmol_cache_file and os.path.exists(tokenmol_cache_file):
             try:
@@ -156,7 +141,6 @@ class DDIDatasetWithFeaturizer(Dataset):
         try:
             feat = self.featurizer(smiles)
             
-            # 注入预计算的 tokenmol_seq
             if smiles in self.tokenmol_cache:
                 feat["tokenmol_seq"] = self.tokenmol_cache[smiles]
             
@@ -181,7 +165,6 @@ class DDIDatasetWithFeaturizer(Dataset):
 
 class DDICollator:
     """
-    DDI 数据整理器
     """
     def __init__(self, dp_collator: DPCollator):
         self.dp_collator = dp_collator
@@ -200,7 +183,6 @@ class DDICollator:
         if len(feat_a_list) == 0:
             return None, None, None
         
-        # 使用 MolCollator 处理（DPCollator 的内部组件）
         drug_a_batch = self.dp_collator.mol_collator(feat_a_list)
         drug_b_batch = self.dp_collator.mol_collator(feat_b_list)
         labels_tensor = torch.tensor(labels, dtype=torch.long)
@@ -232,7 +214,7 @@ def focal_loss_multiclass(logits, labels, gamma=2.0, alpha=None, label_smoothing
 
 
 def compute_class_weights(labels_list, num_classes=4, device='cuda'):
-    """计算类别权重"""
+    
     class_counts = torch.zeros(num_classes)
     for label in labels_list:
         class_counts[label] += 1
@@ -242,7 +224,7 @@ def compute_class_weights(labels_list, num_classes=4, device='cuda'):
 
 
 def compute_metrics(labels: np.ndarray, probs: np.ndarray, num_classes: int = 4) -> Dict[str, float]:
-    """计算评估指标（支持二分类和多分类）"""
+    
     preds = np.argmax(probs, axis=1)
     accuracy = accuracy_score(labels, preds)
     f1_macro = f1_score(labels, preds, average="macro", zero_division=0)
@@ -250,12 +232,10 @@ def compute_metrics(labels: np.ndarray, probs: np.ndarray, num_classes: int = 4)
     
     try:
         if num_classes == 2:
-            # 二分类：使用正类概率
             probs_positive = probs[:, 1] if probs.shape[1] == 2 else probs.flatten()
             auroc_macro = roc_auc_score(labels, probs_positive)
             aupr_macro = average_precision_score(labels, probs_positive)
         else:
-            # 多分类：使用 one-vs-rest
             labels_onehot = label_binarize(labels, classes=list(range(num_classes)))
             auroc_macro = roc_auc_score(labels_onehot, probs, average="macro", multi_class="ovr")
             aupr_macro = average_precision_score(labels_onehot, probs, average="macro")
@@ -275,13 +255,8 @@ def compute_metrics(labels: np.ndarray, probs: np.ndarray, num_classes: int = 4)
 
 def load_kge_embedding(config: Dict) -> Tuple[Optional[Dict], Optional[torch.Tensor], Optional[List[str]], Optional[Dict]]:
     """
-    加载 KGE 嵌入和 SMILES→KG ID 映射
     
     Returns:
-        kge_dict: {entity_id: embedding_vector} 字典，用于 featurizer
-        kge_bank: tensor [N, dim]，用于模型的 KG completion
-        kge_keys: entity_id 列表
-        smiles2kgid: {SMILES: entity_id} 映射
     """
     kg_cfg = config.get("data", {}).get("drug", {}).get("featurizer", {}).get("kg", {})
     kg_path = kg_cfg.get("kg_path")
@@ -302,7 +277,6 @@ def load_kge_embedding(config: Dict) -> Tuple[Optional[Dict], Optional[torch.Ten
         
         if isinstance(kge_data, dict):
             kge_dict = kge_data
-            # 筛选 Drug 实体（以 'D' 开头）
             keys = sorted([k for k in kge_dict.keys() if isinstance(k, str) and k and k[0] == "D"])
             if not keys:
                 keys = sorted([k for k in kge_dict.keys() if isinstance(k, str)])
@@ -310,7 +284,6 @@ def load_kge_embedding(config: Dict) -> Tuple[Optional[Dict], Optional[torch.Ten
             embeddings = torch.stack([torch.tensor(kge_dict[k]).float() for k in keys])
             logger.info(f"Loaded KGE: {len(kge_dict)} total entities, {len(keys)} drugs, dim={embeddings.shape[-1]}")
             
-            # 加载 SMILES → DrugBank ID 映射（从 drug.json）
             smiles2kgid = {}
             drug_json_path = os.path.join(kg_path, "drug.json")
             if os.path.exists(drug_json_path):
@@ -320,7 +293,6 @@ def load_kge_embedding(config: Dict) -> Tuple[Optional[Dict], Optional[torch.Ten
                     for db_id, info in drug_data.items():
                         if isinstance(info, dict) and 'SMILES' in info:
                             smiles = info['SMILES']
-                            # DrugBank ID 直接作为 KG entity ID
                             smiles2kgid[smiles] = db_id
                     logger.info(f"Loaded SMILES→KG mapping: {len(smiles2kgid)} drugs")
                 except Exception as e:
@@ -338,7 +310,7 @@ def load_kge_embedding(config: Dict) -> Tuple[Optional[Dict], Optional[torch.Ten
 
 
 def train_epoch(model, train_loader, optimizer, scheduler, args, device, epoch, class_weights=None):
-    """训练一个 epoch：辅助损失权重(CL/CMSA/CMON)、SA-CMSA/CMON 诊断、KG explain、AMP、NaN 保护"""
+    
     model.train()
     use_amp = True
     amp_dtype = torch.bfloat16
@@ -521,7 +493,7 @@ def train_epoch(model, train_loader, optimizer, scheduler, args, device, epoch, 
 
 @torch.no_grad()
 def evaluate(model, eval_loader, device, num_classes=4):
-    """评估模型"""
+    
     model.eval()
     all_labels = []
     all_probs = []
@@ -578,7 +550,6 @@ def main():
     
     args = parser.parse_args()
     
-    # 设置日志
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_dir = os.path.dirname(args.output_path)
     os.makedirs(log_dir, exist_ok=True)
@@ -597,16 +568,13 @@ def main():
     logger.info(f"Scenario: {args.scenario}")
     logger.info(f"="*70)
     
-    # 加载配置
     with open(args.config_path, "r") as f:
         from utils.paths import expand_asset_paths
         config = expand_asset_paths(json.load(f))
     
-    # 更新配置中的 scenario
     config["network"]["scenario"] = args.scenario
     
     # ============================================================
-    # 消融覆盖：统一 --ablation 接口（与 DTI/PPI 对齐）
     # ============================================================
     net_cfg = config.get("network", config)
     ablation_flags = set()
@@ -635,7 +603,6 @@ def main():
         net_cfg["head_dropout"] = args.dropout
         logger.info(f"Overriding dropout to {args.dropout}")
     
-    # LUO 场景自动设置二分类
     if args.scenario == "LUO":
         args.num_classes = 2
         logger.info(f"LUO scenario detected, setting num_classes=2 (binary classification)")
@@ -650,7 +617,6 @@ def main():
         
         set_seed(seed)
         
-        # 加载数据集
         logger.info("Loading datasets...")
         train_dataset = get_ddi_dataset(
             args.scenario, args.dataset_path, config, 
@@ -668,28 +634,23 @@ def main():
         
         logger.info(f"Train: {len(train_dataset)}, Val: {len(val_dataset)}, Test: {len(test_dataset)}")
         
-        # 加载 KGE embedding
         logger.info("Loading KGE embeddings...")
         kge_dict, kge_bank, kge_keys, smiles2kgid = load_kge_embedding(config)
         
-        # 创建特征提取器（需要传入 KGE embedding）
         logger.info("Creating featurizer...")
         drug_config = copy.deepcopy(config["data"]["drug"])
         if kge_dict is not None:
             drug_config["featurizer"]["kg"]["kge"] = kge_dict
         featurizer = DrugMultiModalFeaturizer(drug_config)
         
-        # 设置 SMILES → KG ID 映射
         if smiles2kgid is not None:
             featurizer.set_drug2kgid_dict(smiles2kgid)
             logger.info(f"Set SMILES→KG mapping: {len(smiles2kgid)} drugs")
         
-        # 查找 TokenMol 3D 预计算缓存
         tokenmol_cache_file = None
         repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
         cache_dir = os.path.join(repo_root, "cache", "tokenmol_3d")
         
-        # 根据场景选择缓存文件
         if args.scenario in ["S1", "S2", "S3"]:
             cache_candidates = [
                 os.path.join(cache_dir, "tokenmol_3d_ddi_unseenddis.pkl"),
@@ -713,7 +674,6 @@ def main():
             logger.warning(f"[DDI] TokenMol cache not found. Run: python scripts/precompute_tokenmol_ddi.py --dataset {args.scenario}")
             logger.warning(f"[DDI] MolToken will compute 3D features on-the-fly (slower)")
         
-        # 包装数据集
         train_dataset_wrapped = DDIDatasetWithFeaturizer(
             train_dataset, featurizer, cache_features=True, tokenmol_cache_file=tokenmol_cache_file
         )
@@ -724,7 +684,6 @@ def main():
             test_dataset, featurizer, cache_features=True, tokenmol_cache_file=tokenmol_cache_file
         )
         
-        # 创建 Collator（必须用 drug 配置，和 DP 一致）
         dp_collator = DPCollator(config["data"]["drug"])
         ddi_collator = DDICollator(dp_collator)
         
@@ -745,13 +704,11 @@ def main():
             pin_memory=True,
         )
         
-        # 计算类别权重
         all_labels = [item["label"] for item in train_dataset]
         class_weights = compute_class_weights(all_labels, args.num_classes, args.device)
         logger.info(f"Class distribution: {torch.bincount(torch.tensor(all_labels), minlength=args.num_classes).tolist()}")
         logger.info(f"Class weights: {class_weights.cpu().numpy()}")
         
-        # 创建模型（SA-CMSA + CMON 架构，与 DTI/PPI 对齐）
         logger.info("Creating model...")
         model = create_ddi_model(
             config,
@@ -761,12 +718,10 @@ def main():
         )
         model = model.to(args.device)
         
-        # 统计参数量
         total_params = sum(p.numel() for p in model.parameters())
         trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
         logger.info(f"Total params: {total_params/1e6:.2f}M, Trainable: {trainable_params/1e6:.2f}M")
         
-        # 优化器
         optimizer = torch.optim.AdamW(
             [p for p in model.parameters() if p.requires_grad],
             lr=args.lr,
@@ -774,7 +729,6 @@ def main():
             betas=(0.9, 0.999),
         )
         
-        # 学习率调度器
         total_steps = len(train_loader) * args.epochs // args.accumulation_steps
         warmup_steps = int(total_steps * args.warmup_ratio)
         
@@ -796,7 +750,6 @@ def main():
         logger.info(f"  Total steps: {total_steps}, Warmup: {warmup_steps}")
         logger.info(f"  Early Stopping: based on TEST set AUROC (patience={args.patience})")
         args._explain_dir = os.path.join(os.path.dirname(args.output_path), "explain")        
-        # 训练循环
         for epoch in range(args.epochs):
             logger.info(f"\n--- Epoch {epoch + 1}/{args.epochs} ---")
             
@@ -806,22 +759,18 @@ def main():
             )
             logger.info(f"Train Loss: {train_loss:.4f}")
             
-            # 验证
             val_metrics = evaluate(model, val_loader, args.device, args.num_classes)
             logger.info(f"Val: Acc={val_metrics['Accuracy']:.4f}, AUROC={val_metrics['AUROC']:.4f}, "
                        f"AUPR={val_metrics['AUPR']:.4f}, F1={val_metrics['F1_macro']:.4f}")
             
-            # 测试（每个 epoch 都评估，用于 Early Stopping）
             test_metrics = evaluate(model, test_loader, args.device, args.num_classes)
             logger.info(f"Test: Acc={test_metrics['Accuracy']:.4f}, AUROC={test_metrics['AUROC']:.4f}, "
                        f"AUPR={test_metrics['AUPR']:.4f}, F1={test_metrics['F1_macro']:.4f}")
             
-            # Early Stopping（以测试集 AUROC 为准）
             if stopper.step(test_metrics["AUROC"], model, epoch):
                 logger.info(f"Early stopping at epoch {epoch + 1}")
                 break
         
-        # 加载最佳模型
         logger.info("\nLoading best model for final evaluation...")
         checkpoint = torch.load(args.output_path)
         model.load_state_dict(checkpoint["model_state_dict"])
@@ -838,7 +787,6 @@ def main():
         
         all_results.append(final_metrics)
     
-    # 汇总结果
     if len(all_results) > 1:
         accuracies = [r["Accuracy"] for r in all_results]
         aurocs = [r["AUROC"] for r in all_results]
@@ -854,7 +802,6 @@ def main():
         logger.info(f"{'='*60}")
 
 
-# 需要导入 math
 import math
 
 if __name__ == "__main__":

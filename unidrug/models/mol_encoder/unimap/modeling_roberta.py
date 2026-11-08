@@ -49,7 +49,6 @@ try:
         prune_linear_layer,
     )
 except ImportError:
-    # 兼容新版本的transformers
     def apply_chunking_to_forward(chunk_size, chunk_dim, forward_fn):
         return forward_fn
     def find_pruneable_heads_and_indices(heads, n_heads, head_size, already_pruned_heads):

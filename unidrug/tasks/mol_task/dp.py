@@ -17,11 +17,10 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts, ReduceLROnPlateau, LambdaLR
 
-# 可视化（可选）
 try:
     import matplotlib.pyplot as plt
     import matplotlib
-    matplotlib.use('Agg')  # 非交互式后端
+    matplotlib.use('Agg')
     MATPLOTLIB_AVAILABLE = True
 except ImportError:
     MATPLOTLIB_AVAILABLE = False
@@ -34,18 +33,16 @@ from datasets.dp_dataset import SUPPORTED_DP_DATASETS, Task
 from utils import DPCollator, AverageMeter, EarlyStopping, ToDevice
 from models.task_model.dp import DPModel
 
-# ========= 回归任务支持=========
-# 回归任务数据集映射
 REGRESSION_DATASETS = {"ESOL", "Lipo", "FreeSolv", "qm7", "qm8", "qm9"}
 
 def is_regression_task(dataset_name: str) -> bool:
-    """判断是否为回归任务"""
+    
     return dataset_name in REGRESSION_DATASETS
 
 logger = logging.getLogger(__name__)
 
 def grad_norm_l2(parameters) -> float:
-    """计算当前梯度的 L2 范数（用于显示“最终裁剪后”的 GN）。"""
+    
     total = 0.0
     for p in parameters:
         if p is None or p.grad is None:
@@ -58,7 +55,6 @@ def grad_norm_l2(parameters) -> float:
 
 def grad_norm_groups(model, group_patterns: Dict[str, List[str]]) -> Dict[str, float]:
     """
-    计算不同模块(按参数名pattern粗分)的梯度 L2 范数，用于定位梯度尖峰来源。
     group_patterns: {"llm":["llm","lora"], "struct":["struct","graph"], ...}
     """
     sums = {k: 0.0 for k in group_patterns.keys()}
@@ -97,7 +93,7 @@ def is_main_process():
     return get_rank() == 0
 
 def setup_distributed(args):
-    """torchrun 启动时，通过环境变量初始化分布式。"""
+    
     if "RANK" in os.environ and "WORLD_SIZE" in os.environ:
         args.rank = int(os.environ["RANK"])
         args.world_size = int(os.environ["WORLD_SIZE"])
@@ -121,7 +117,7 @@ def cleanup_distributed():
         dist.destroy_process_group()
 
 def all_gather_concat(t: torch.Tensor) -> torch.Tensor:
-    """支持不同 batch 大小的 all_gather（按第 0 维拼接）。"""
+    
     if not is_dist():
         return t
     world = get_world_size()
@@ -170,9 +166,6 @@ def build_loaders(args, cfg):
         val_sampler = DistributedSampler(val_dataset, shuffle=False, drop_last=False)
         test_sampler = DistributedSampler(test_dataset, shuffle=False, drop_last=False)
 
-    # 关键修复drop_last=True 避免最后一个不完整 batch 导致的梯度爆炸
-    # 诊断结论：GN:19.78, GN:23.94 等梯度爆炸几乎总是发生在最后一个 batch (72/72)
-    # 原因：不完整 batch 的 BatchNorm 统计不稳定 + Bilinear Interaction 放大噪声
     train_loader = DataLoader(
         train_dataset,
         batch_size=args.batch_size,
@@ -180,7 +173,7 @@ def build_loaders(args, cfg):
         sampler=train_sampler,
         num_workers=args.num_workers,
         collate_fn=collator,
-        drop_last=True,  # 丢弃不完整的最后一个 batch
+        drop_last=True,
     )
     val_loader = DataLoader(
         val_dataset,
@@ -205,18 +198,12 @@ def build_loaders(args, cfg):
 
 def prepare_labels(raw_labels: torch.Tensor, is_regression: bool = False):
     """
-    准备训练标签和 mask
     
-    分类任务：标签编码 +1=正类, -1=负类, 0=缺失
-    回归任务：标签是连续值（已标准化），非 NaN 即有效
     """
     if is_regression:
-        # 回归任务标签是连续值，直接使用
-        # mask: 非 NaN 的位置有效
         mask = ~torch.isnan(raw_labels)
         targets = torch.where(mask, raw_labels, torch.zeros_like(raw_labels))
     else:
-        # 分类任务标签编码 +1/-1/0
         mask = raw_labels.abs() > 0
         targets = torch.where(raw_labels > 0, torch.ones_like(raw_labels), torch.zeros_like(raw_labels))
     return targets, mask
@@ -233,8 +220,6 @@ def compute_metrics(labels: np.ndarray, probs: np.ndarray) -> Dict[str, float]:
     metrics = {}
     roc_list = []
 
-    # 科学处理：不在指标阶段“填充”NaN 来掩盖数值问题。
-    # 一旦出现 NaN，说明 forward/训练已经数值不稳定，应当定位源头并修复。
     if np.isnan(probs).any():
         nan_cnt = int(np.isnan(probs).sum())
         raise ValueError(
@@ -253,31 +238,22 @@ def compute_metrics(labels: np.ndarray, probs: np.ndarray) -> Dict[str, float]:
         if len(np.unique(y_bin)) < 2:
             continue
         roc_list.append(roc_auc_score(y_bin, scores))
-    # 说明：
-    # - roc_list: 每个可计算 AUC 的 task 的 AUC 列表（跳过全 0 / 全 1 的 task）
-    # - roc_auc: 任务级 macro 平均
-    # - roc_auc_std: 任务间标准差（常见论文里的 “mean ± std” 若按 task 统计）
     metrics["roc_auc"] = float(np.mean(roc_list)) if roc_list else 0.0
     metrics["roc_auc_std"] = float(np.std(roc_list)) if roc_list else 0.0
     metrics["roc_auc_n"] = int(len(roc_list))
     return metrics
 
 
-# ========= 回归任务指标=========
 def compute_regression_metrics(labels: np.ndarray, preds: np.ndarray) -> Dict[str, float]:
     """
-    计算回归任务指标：RMSE, MAE, R²
     
     Args:
-        labels: 真实值 (N, num_tasks) 或 (N,)
-        preds: 预测值 (N, num_tasks) 或 (N,)
     
     Returns:
         metrics: {"rmse": float, "mae": float, "r2": float}
     """
     from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
     
-    # 确保是 2D
     if labels.ndim == 1:
         labels = labels.reshape(-1, 1)
         preds = preds.reshape(-1, 1)
@@ -288,7 +264,6 @@ def compute_regression_metrics(labels: np.ndarray, preds: np.ndarray) -> Dict[st
         y_true = labels[:, i]
         y_pred = preds[:, i]
         
-        # 跳过全 NaN 的任务
         valid_mask = ~np.isnan(y_true) & ~np.isnan(y_pred)
         if valid_mask.sum() < 2:
             continue
@@ -299,7 +274,6 @@ def compute_regression_metrics(labels: np.ndarray, preds: np.ndarray) -> Dict[st
         rmse = np.sqrt(mean_squared_error(y_true_valid, y_pred_valid))
         mae = mean_absolute_error(y_true_valid, y_pred_valid)
         
-        # R² 需要至少有方差
         if np.std(y_true_valid) > 1e-6:
             r2 = r2_score(y_true_valid, y_pred_valid)
         else:
@@ -322,20 +296,11 @@ def compute_regression_metrics(labels: np.ndarray, preds: np.ndarray) -> Dict[st
 
 class EMA:
     """
-    SOTA 技术Exponential Moving Average (指数移动平均)
     
-    科学原理：
-    - 对模型权重进行平滑，减少训练过程中的噪声波动
     - shadow_weight = decay * shadow_weight + (1 - decay) * model_weight
-    - 推理时使用 shadow 权重，通常比原始权重更稳定
     
-    参考：
     - Polyak averaging (1992)
-    - 广泛应用于 BERT、ViT、MAE 等 SOTA 模型
     
-    使用建议：
-    - decay=0.999 适合大多数情况
-    - 训练时更新 EMA，评估时用 EMA 权重
     """
     
     def __init__(self, model: torch.nn.Module, decay: float = 0.999):
@@ -344,27 +309,26 @@ class EMA:
         self.shadow = {}
         self.backup = {}
         
-        # 初始化 shadow 参数
         for name, param in model.named_parameters():
             if param.requires_grad:
                 self.shadow[name] = param.data.clone()
     
     def update(self):
-        """更新 EMA 权重（每个训练 step 调用一次）"""
+        
         for name, param in self.model.named_parameters():
             if param.requires_grad and name in self.shadow:
                 # shadow = decay * shadow + (1 - decay) * param
                 self.shadow[name].mul_(self.decay).add_(param.data, alpha=1 - self.decay)
     
     def apply_shadow(self):
-        """将 shadow 权重应用到模型（评估前调用）"""
+        
         for name, param in self.model.named_parameters():
             if param.requires_grad and name in self.shadow:
                 self.backup[name] = param.data.clone()
                 param.data.copy_(self.shadow[name])
     
     def restore(self):
-        """恢复原始权重（评估后调用）"""
+        
         for name, param in self.model.named_parameters():
             if param.requires_grad and name in self.backup:
                 param.data.copy_(self.backup[name])
@@ -373,56 +337,41 @@ class EMA:
 
 class DynamicLossScheduler:
     """
-    极简版损失调度器
     
-    诊断结论：
-    1. 复杂的动态调度容易引入不稳定性
-    2. 固定权重更容易调优和复现
-    3. 只保留基本的历史记录功能
     """
     
     def __init__(self, total_epochs: int):
         self.total_epochs = total_epochs
         self.history = {"train_auc": [], "test_auc": [], "gap": []}
         
-        # 简化版固定权重 - 专注主任务
         self.base_weights = {
             "main": 1.0,
-            "align": 0.15,        # 模态对齐
-            "kg_recon": 0.05,     # KG 补全自监督（结构引导稀疏注意力）
-            # 其余辅助损失（recon/consistency/kg_rank/mtfl 等）已从主训练路径移除，避免分支膨胀与梯度不稳定
+            "align": 0.15,
+            "kg_recon": 0.05,
         }
         
     def update_history(self, train_auc: float, test_auc: float):
-        """更新历史记录"""
+        
         self.history["train_auc"].append(train_auc)
         self.history["test_auc"].append(test_auc)
         self.history["gap"].append(train_auc - test_auc)
         
     def get_weights(self, epoch: int) -> Dict[str, float]:
-        """返回固定权重"""
+        
         return self.base_weights.copy()
 
 
 def poly_loss(logits: torch.Tensor, targets: torch.Tensor, epsilon: float = 1.0, pos_weight: Optional[torch.Tensor] = None) -> torch.Tensor:
     """
-    SOTA 提升PolyLoss: A Polynomial Expansion Perspective of Classification Loss Functions
     
-    原理：在 Cross-Entropy (CE) 基础上增加一个多项式项，增强对困难样本的判别力。
-    公式：L_poly = L_ce + epsilon * (1 - p_t)
     """
-    # 计算 BCE Loss
     bce_loss = F.binary_cross_entropy_with_logits(
         logits, targets, reduction='none', pos_weight=pos_weight
     )
     
-    # 计算 Pt (目标类别的预测概率)
     probs = torch.sigmoid(logits)
     pt = torch.where(targets == 1, probs, 1 - probs)
     
-    # PolyLoss 项：epsilon * (1 - pt)
-    # 当 pt 接近 1 (易分类) 时，该项接近 0
-    # 当 pt 接近 0 (难分类) 时，该项接近 epsilon，提供额外梯度
     poly_term = epsilon * (1 - pt)
     
     return bce_loss + poly_term
@@ -437,13 +386,8 @@ def confidence_aware_focal_loss(
     pos_weight: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """
-    创新置信度感知的 Focal Loss (带正样本加权)
     
-    核心思想：
-    - 低置信度样本 = 困难样本 → 损失权重更高
-    - 结合 Focal Loss 和 Class Imbalance Correction
     """
-    # BCE Loss (支持 pos_weight 处理类别不平衡)
     bce_loss = F.binary_cross_entropy_with_logits(
         logits, targets, reduction='none', pos_weight=pos_weight
     )
@@ -453,7 +397,6 @@ def confidence_aware_focal_loss(
     p_t = probs * targets + (1 - probs) * (1 - targets)
     focal_weight = (1 - p_t) ** gamma
     
-    # 置信度加权：conf 越低，权重越高
     conf_weight = 1.0 + conf_boost * (1.0 - fusion_conf.detach())
     conf_weight = conf_weight.unsqueeze(-1)  # (B, 1)
     
@@ -470,30 +413,16 @@ def asymmetric_loss(
     """
     SOTAAsymmetric Loss for Multi-Label Classification
     
-    原理：
-    - 对正样本和负样本使用不同的 gamma 值
-    - gamma_neg > gamma_pos: 更关注正样本（少数类）
-    - clip: 对高置信度负样本进行概率裁剪，避免其主导梯度
     
-    参考：Ridnik et al., "Asymmetric Loss For Multi-Label Classification", ICCV 2021
     
-    优势：
-    - 专门为多标签分类设计
-    - 有效处理类别不平衡
-    - SIDER 等副作用预测任务非常适用
     """
-    # 自适应梯度稳定根据任务数调整clamp强度
-    # 单任务（BBBP）：梯度集中，需要强保护
-    # 多任务（SIDER等）：梯度分散，保持原设计不变
     num_tasks = logits.size(-1) if logits.dim() > 1 else 1
     is_single_task = (num_tasks <= 2)
     
-    if is_single_task:  # 单任务或二分类（BBBP）
-        # 强保护：防止梯度爆炸
+    if is_single_task:
         logits = logits.clamp(-10, 10)
-        min_prob = 0.001      # 最大梯度 = 1000
-    else:  # 多任务（SIDER、Tox21、ToxCast等）
-        # 保持原设计：无额外clamp，保证精度
+        min_prob = 0.001
+    else:
         min_prob = 1e-8
     
     probs = torch.sigmoid(logits)
@@ -515,7 +444,6 @@ def asymmetric_loss(
     
     loss = -(pos_loss + neg_loss)
     
-    # 仅单任务对loss进行clamp，多任务保持原设计无clamp
     if is_single_task:
         loss = loss.clamp(max=5.0)
     
@@ -531,24 +459,13 @@ def focal_loss_binary(
     pos_weight: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """
-    二分类专用Focal Loss
     
-    科学原理（Lin et al., ICCV 2017）：
-    - 降低易分类样本的权重，聚焦难样本
-    - 适用于类别不平衡场景（如 BBBP）
     
-    公式：
     FL(p_t) = -alpha_t * (1 - p_t)^gamma * log(p_t)
     
     Args:
-        logits: (B, T) 预测 logits
-        targets: (B, T) 目标标签
-        mask: (B, T) 有效性掩码
-        gamma: 聚焦参数，越大越聚焦难样本（默认 2.0）
-        alpha: 正样本权重（默认 0.25）
     
     Returns:
-        Focal Loss 值
     """
     probs = torch.sigmoid(logits)
     
@@ -561,7 +478,6 @@ def focal_loss_binary(
     # Focal weight: (1 - p_t)^gamma
     focal_weight = (1 - p_t) ** gamma
     
-    # BCE loss (without reduction), 支持 per-task pos_weight（处理类别不平衡）
     bce_loss = F.binary_cross_entropy_with_logits(
         logits, targets, reduction='none', pos_weight=pos_weight
     )
@@ -584,70 +500,39 @@ def balanced_finetuning_loss(
     pos_weight: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """
-    创新Balanced Fine-Tuning (BFT) Loss - 超越 SOTA 版本
     
-    来源：文献中的平衡微调方法 + 针对药物性质预测的优化
     
-    核心思想：
-    1. Token-level Weighting：低置信度的预测减少梯度贡献，防止过拟合
-    2. Sample-level Weighting：困难样本（低置信度）获得更高权重
     
-    参数调优建议：
-    - tau=0.3: 温和（早期训练）→ tau=0.5: 平衡（冲击 SOTA）→ tau=1.0: 激进
-    - lambda_s=0.3: 温和 → lambda_s=0.5: 平衡 → lambda_s=1.0: 激进
     
     Args:
-        logits: (B, T) 预测 logits
-        targets: (B, T) 目标标签
-        mask: (B, T) 有效性掩码
-        tau: 温度参数，控制置信度的敏感度
-        lambda_s: 样本级加权强度
     
     Returns:
-        加权后的 BCE 损失
     """
-    # 1. 计算预测概率 (置信度)
     probs = torch.sigmoid(logits)
     
-    # 2. Token-level Weighting: w_t = p_t^tau (高置信度 token 权重更大)
-    # 对于正样本：置信度 = probs
-    # 对于负样本：置信度 = 1 - probs
     confidence = torch.where(targets > 0.5, probs, 1 - probs)
-    # 限制置信度范围，防止数值问题
     confidence = confidence.clamp(0.1, 0.9)
     
-    # 关键修复切断梯度的"自我对抗"
-    # 如果不detach，模型会为了降低 Loss 而降低权重（即降低 confidence），
-    # 这与分类目标（提高 confidence）相矛盾，导致梯度剧烈震荡和爆炸。
     confidence_detached = confidence.detach()
     
-    # Token 权重：高置信度 token 正常贡献，低置信度 token 减少贡献
-    token_weight = confidence_detached ** tau  # 范围 [0.1^tau, 0.9^tau]
+    token_weight = confidence_detached ** tau
     
     # 3. Sample-level Weighting: s_b = 1 + lambda_s * (1 - min_confidence)
-    # 困难样本（最小置信度低）获得更高权重
-    masked_confidence = confidence_detached * mask + (1 - mask) * 1.0  # 无效位置置为1
+    masked_confidence = confidence_detached * mask + (1 - mask) * 1.0
     min_confidence_per_sample = masked_confidence.min(dim=1, keepdim=True)[0]  # (B, 1)
     
-    # 样本权重：难度越高（min_conf 越低），权重越大
-    sample_weight = 1.0 + lambda_s * (1.0 - min_confidence_per_sample)  # 范围 [1, 1+lambda_s]
+    sample_weight = 1.0 + lambda_s * (1.0 - min_confidence_per_sample)
     
-    # 4. 计算基础 BCE Loss（支持 per-task pos_weight）
     bce_loss = F.binary_cross_entropy_with_logits(
         logits, targets, reduction='none', pos_weight=pos_weight
     )
     
-    # 修复梯度爆炸限制单个 token 的 BCE 损失
-    # 原理：极端情况下 BCE 可能很大，导致梯度爆炸
     bce_loss = bce_loss.clamp(max=5.0)
     
-    # 5. 应用 Token 和 Sample 权重
     weighted_loss = bce_loss * token_weight * sample_weight
     
-    # 6. 对有效位置求平均
     loss = (weighted_loss * mask).sum() / (mask.sum() + 1e-6)
     
-    # 双重保险限制最终损失
     loss = loss.clamp(max=2.0)
     
     return loss
@@ -655,16 +540,11 @@ def balanced_finetuning_loss(
 
 def kl_divergence_loss(p_logits: torch.Tensor, q_logits: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     """
-    突破性技术R-Drop KL散度损失
-    计算两个输出分布之间的对称KL散度，强制模型输出一致性
     
-    对于二分类，使用伯努利分布的KL散度
     """
     p = torch.sigmoid(p_logits)
     q = torch.sigmoid(q_logits)
     
-    # 对称KL散度: 0.5 * (KL(p||q) + KL(q||p))
-    # 对于伯努利分布: KL(p||q) = p*log(p/q) + (1-p)*log((1-p)/(1-q))
     eps = 1e-6
     kl_pq = p * (torch.log(p + eps) - torch.log(q + eps)) + \
             (1 - p) * (torch.log(1 - p + eps) - torch.log(1 - q + eps))
@@ -673,7 +553,6 @@ def kl_divergence_loss(p_logits: torch.Tensor, q_logits: torch.Tensor, mask: tor
     
     kl_loss = 0.5 * (kl_pq + kl_qp)
     
-    # 只在有效位置计算
     return (kl_loss * mask).sum() / (mask.sum() + eps)
 
 
@@ -694,7 +573,7 @@ def train_epoch(
     partition_weights_history=None,
     use_uncertainty_weighting=True,
     use_focal_loss=True,
-    ema=None,  # 新增EMA 支持
+    ema=None,
     pos_weight: Optional[torch.Tensor] = None,
     max_grad_norm: float = 1.0,
     loss_type: str = "bft",
@@ -705,10 +584,10 @@ def train_epoch(
     accumulation_steps: int = 1,
     explain_dir: Optional[str] = None,
     explain_max_samples: int = 200,
-    is_regression: bool = False,  # 回归任务支持
-    normalizers: Optional[List] = None,  # 回归任务反标准化
+    is_regression: bool = False,
+    normalizers: Optional[List] = None,
 ):
-    """训练一个 epoch"""
+    
     model.train()
     
     _raw_model = model.module if hasattr(model, 'module') else model
@@ -721,11 +600,9 @@ def train_epoch(
     all_labels = []
     total_batches = len(loader)
     
-    # 收集分区权重用于可视化
     epoch_partition_weights = []
     epoch_partition_modal_names = None
     
-    # 收集 Uncertainty Weighting 的权重
     uw_weights_log = []
 
     optimizer.zero_grad(set_to_none=True)
@@ -738,17 +615,13 @@ def train_epoch(
         label = label.to(device).float()
         targets, mask = prepare_labels(label, is_regression=is_regression)
         mask = mask.float()
-        # batch 标签统计（用于解释 loss/grad 抖动）
         with torch.no_grad():
-            valid_frac = float(mask.mean().item())  # 有效标签比例（多任务缺失会让这个变小）
+            valid_frac = float(mask.mean().item())
             if is_regression:
-                # 回归任务：计算标签均值和标准差
                 pos_rate = float(targets[mask > 0.5].mean().item()) if mask.sum() > 0 else 0.0
             else:
-                # 分类任务：计算正类比例
                 pos_rate = float(((targets > 0.5).float() * mask).sum().item() / (mask.sum().item() + 1e-6))
         
-        # 分类任务专用Label Smoothing（回归任务跳过）
         if label_smoothing > 0 and not is_regression:
             smooth = label_smoothing
             targets = targets * (1 - smooth) + 0.5 * smooth
@@ -761,14 +634,11 @@ def train_epoch(
             targets = lam_struct * targets + (1 - lam_struct) * targets[perm]
             mask = lam_struct * mask + (1 - lam_struct) * mask[perm]
 
-        # optimizer.zero_grad(set_to_none=True) # 移动到 step 之后
 
-        # BF16: 开 autocast 但不要 GradScaler；FP16: autocast + GradScaler
         with torch.amp.autocast('cuda', enabled=bool(use_amp), dtype=amp_dtype):
             output, _ = model(drug, mixup=mixup_params)
             logits = output["classification"]
 
-            # 科学定位：如果这里出现 NaN/Inf，直接报错（不要在指标处“填充”掩盖）
             if not torch.isfinite(logits).all():
                 bad = (~torch.isfinite(logits)).sum().item()
                 safe = torch.nan_to_num(logits)
@@ -779,16 +649,11 @@ def train_epoch(
                 )
                 raise FloatingPointError("Non-finite logits detected (NaN/Inf).")
             
-            # R-Drop可选的第二次前向传播
-            # 注意：R-Drop 会使显存占用翻倍，谨慎启用
-            # 默认关闭以节省显存
             logits2 = None
             if use_rdrop and model.training:
                 output2, _ = model(drug, mixup=mixup_params)
                 logits2 = output2["classification"]
-                # 不对 logits 做硬截断；数值稳定应由 loss 的稳定实现与 NaNGuard 来保证
             
-            # 收集分区权重
             if output.get("partition_info") is not None:
                 pi = output.get("partition_info")
                 if isinstance(pi, dict) and pi.get("modal_weights") is not None:
@@ -799,41 +664,28 @@ def train_epoch(
                     if names is not None and isinstance(names, (list, tuple)):
                         epoch_partition_modal_names = [str(x) for x in names]
             
-            # 修复移除重复的 Label Smoothing (286行已经处理过 targets)
-            # 之前这里又做了一次固定 0.05 的平滑，导致双重平滑，可能损害性能
             targets_smooth = targets
             
-            # 解决类别不平衡：使用训练集统计得到的 per-task pos_weight（更稳定、更科学）
             # pos_weight[t] ≈ (#neg_t / #pos_t)
-            # 注意：这里的 targets/mask 已在上游按 raw_labels.abs()>0 做了有效性过滤。
             pw = pos_weight
 
-            # ========= V4置信度加权损失计算 =========
-            # 获取样本权重（低置信度样本权重低）
             sample_weights = output.get("sample_weights", None)  # (B,)
             if sample_weights is not None:
-                # 扩展到 (B, num_labels) 以匹配loss维度
                 sample_weights = sample_weights.unsqueeze(-1).expand_as(mask)
             
-            # 主损失类型
             lt = str(loss_type).lower()
             
-            # ========= 回归任务损失=========
             if lt == "mse":
-                # MSE 损失（回归任务）
-                # logits 直接作为预测值（不经过 sigmoid）
                 _mse = F.mse_loss(logits, targets, reduction="none")
                 if sample_weights is not None:
                     _mse = _mse * sample_weights
                 main_loss = (_mse * mask).sum() / (mask.sum() + 1e-6)
             elif lt == "mae":
-                # MAE 损失（回归任务，对异常值更鲁棒）
                 _mae = F.l1_loss(logits, targets, reduction="none")
                 if sample_weights is not None:
                     _mae = _mae * sample_weights
                 main_loss = (_mae * mask).sum() / (mask.sum() + 1e-6)
             elif lt == "huber":
-                # Huber 损失（回归任务，结合 MSE 和 MAE 的优点）
                 _huber = F.smooth_l1_loss(logits, targets, reduction="none", beta=1.0)
                 if sample_weights is not None:
                     _huber = _huber * sample_weights
@@ -842,11 +694,9 @@ def train_epoch(
                 _bce = F.binary_cross_entropy_with_logits(
                     logits, targets_smooth, reduction="none", pos_weight=pw
                 )
-                # 防梯度尖峰限制单样本BCE损失，防止极端预测导致梯度爆炸
-                # BCE在p→0或p→1时梯度趋向无穷，clamp到5.0（对应p≈0.007或0.993）
                 _bce = _bce.clamp(max=5.0)
                 if sample_weights is not None:
-                    _bce = _bce * sample_weights  # 置信度加权
+                    _bce = _bce * sample_weights
                 main_loss = (_bce * mask).sum() / (mask.sum() + 1e-6)
             elif lt == "focal":
                 main_loss = focal_loss_binary(
@@ -854,14 +704,12 @@ def train_epoch(
                     gamma=2.0, alpha=0.25, pos_weight=pw,
                 )
             elif lt == "asl":
-                # V10优化根据任务数动态调整ASL参数
-                # ToxCast等大规模多任务：降低gamma防止过度抑制
                 num_tasks = logits.size(1) if logits.dim() > 1 else 1
-                if num_tasks > 100:  # 大规模多任务（如ToxCast 617）
+                if num_tasks > 100:
                     gamma_pos, gamma_neg, clip_val = 0.5, 1.5, 0.03
-                elif num_tasks > 20:  # 中等规模（如SIDER 27）
+                elif num_tasks > 20:
                     gamma_pos, gamma_neg, clip_val = 1.0, 2.0, 0.05
-                else:  # 小规模（如BBBP 1）
+                else:
                     gamma_pos, gamma_neg, clip_val = 1.0, 2.5, 0.05
                     
                 _asl = asymmetric_loss(
@@ -869,34 +717,27 @@ def train_epoch(
                     gamma_pos=gamma_pos, gamma_neg=gamma_neg, clip=clip_val,
                 )
                 if sample_weights is not None:
-                    _asl = _asl * sample_weights  # 置信度加权
+                    _asl = _asl * sample_weights
                 main_loss = (_asl * mask).sum() / (mask.sum() + 1e-6)
             else:
-                # 默认 BCE
                 _bce = F.binary_cross_entropy_with_logits(
                     logits, targets_smooth, reduction="none", pos_weight=pw
                 )
-                _bce = _bce.clamp(max=5.0)  # 防梯度尖峰
+                _bce = _bce.clamp(max=5.0)
                 if sample_weights is not None:
-                    _bce = _bce * sample_weights  # 置信度加权
+                    _bce = _bce * sample_weights
                 main_loss = (_bce * mask).sum() / (mask.sum() + 1e-6)
 
-            # 辅助损失
             aux_losses = output.get("aux_losses", {})
             
-            # R-Drop正则化损失（标准双向KL散度）
             rdrop_loss = aux_losses.get("rdrop_loss", torch.tensor(0.0, device=device))
             if isinstance(rdrop_loss, torch.Tensor):
-                rdrop_loss = rdrop_loss.clamp(0, 1.0)  # 保持合理范围
+                rdrop_loss = rdrop_loss.clamp(0, 1.0)
             
-            # 特征一致性损失
             consistency_loss = aux_losses.get("consistency_loss", torch.tensor(0.0, device=device))
             if isinstance(consistency_loss, torch.Tensor):
                 consistency_loss = consistency_loss.clamp(0, 0.1)
 
-            # 互补性相似度（纯监控指标，不参与训练）
-            # 原因：互补性约束在训练中容易导致不稳定（投影层梯度问题）
-            # 现在只作为监控，用于观察两模态是否学到互补信息
             complementarity_sim = aux_losses.get("complementarity_loss", torch.tensor(0.0, device=device))
             
             contrastive_loss = aux_losses.get("contrastive_loss", torch.tensor(0.0, device=device))
@@ -927,7 +768,6 @@ def train_epoch(
             total_loss = (main_loss + rdrop_loss + consistency_loss +
                           contrastive_loss + cmsa_loss + cmon_loss)
             
-            # 诊断检测异常损失值
             if total_loss.item() < 0 or total_loss.item() > 100:
                 _vals = {
                     'main': main_loss.item(),
@@ -941,7 +781,6 @@ def train_epoch(
                     f"Components: {_vals}"
                 )
 
-            # 梯度累积Loss 除以累积步数
             total_loss = total_loss / accumulation_steps
 
         if grad_scaler is not None:
@@ -949,45 +788,31 @@ def train_epoch(
         else:
             total_loss.backward()
 
-        # 科学版v2梯度处理 - 基于梯度裁剪的稳定更新
         # 
-        # 科学原理：
-        # 1. 梯度裁剪是处理梯度爆炸的标准方法（Pascanu et al., 2013）
-        # 2. NaN/Inf通常源于数值溢出，应该回退到安全状态而非用0替换
-        # 3. 使用GradScaler的动态缩放来自动处理FP16溢出
         #
         grad_norm = 0.0
         if batch_idx % accumulation_steps == 0 or batch_idx == total_batches:
             if grad_scaler is not None:
-                # FP16/BF16混合精度训练
                 grad_scaler.unscale_(optimizer)
                 
-                # 梯度裁剪（处理梯度爆炸的标准方法）
                 grad_norm = torch.nn.utils.clip_grad_norm_(
                     model.parameters(), max_norm=float(max_grad_norm)
                 )
                 grad_norm = float(grad_norm) if torch.isfinite(torch.tensor(grad_norm)) else 0.0
                 
-                # GradScaler会自动检测inf/nan并跳过更新，同时调整scale
-                # 这是PyTorch官方推荐的处理方式
                 grad_scaler.step(optimizer)
                 grad_scaler.update()
                 
                 if ema is not None and torch.isfinite(torch.tensor(grad_norm)):
                     ema.update()
             else:
-                # FP32训练
-                # 先裁剪梯度
                 grad_norm = torch.nn.utils.clip_grad_norm_(
                     model.parameters(), max_norm=float(max_grad_norm)
                 )
                 grad_norm = float(grad_norm)
                 
-                # 检查是否有NaN/Inf（裁剪后仍可能存在）
                 if math.isnan(grad_norm) or math.isinf(grad_norm):
-                    # 记录警告但不更新参数（保护模型状态）
                     logger.warning(f"[GradGuard] NaN/Inf gradient detected at batch {batch_idx}, skipping update")
-                    # 不调用optimizer.step()，保持模型参数不变
                 else:
                     optimizer.step()
                     if ema is not None:
@@ -998,49 +823,40 @@ def train_epoch(
             if warm_scheduler is not None:
                 warm_scheduler.step()
 
-        # 记录 Loss (还原为真实 Loss 大小)
         loss_meter.update(total_loss.item() * accumulation_steps, label.size(0))
         main_loss_meter.update(main_loss.item(), label.size(0))
-        # 记录R-Drop + Consistency损失
         aux_loss = (rdrop_loss.item() if isinstance(rdrop_loss, torch.Tensor) else 0.0) + \
                    (consistency_loss.item() if isinstance(consistency_loss, torch.Tensor) else 0.0)
         align_loss_meter.update(aux_loss, label.size(0))
         
         with torch.no_grad():
             if is_regression:
-                # 回归任务：直接使用 logits 作为预测值
                 preds = logits
             else:
-                # 分类任务：使用 sigmoid 转换为概率
                 preds = torch.sigmoid(logits)
             if not torch.isfinite(preds).all():
                 raise FloatingPointError("Non-finite predictions detected (NaN/Inf).")
             all_probs.append(preds.detach().float().cpu())
             all_labels.append(label.detach().cpu())
 
-        # 收集各模块统计信息
         if not hasattr(train_epoch, '_module_stats'):
             train_epoch._module_stats = {
                 'kg_completed': 0, 'kg_total': 0,
                 'text_sources': {'kg_relation': 0, 'drug_text': 0, 'smiles_derived': 0, 'none': 0},
                 'moltoken_complementarity': [],
-                # KG 补全解释样本（用于落盘可视化）
                 'kg_explain_samples': [],
             }
         
-        # 收集KG补全情况
         if output.get("kg_is_completed") is not None:
             kg_completed = output["kg_is_completed"]
             train_epoch._module_stats['kg_completed'] += kg_completed.sum().item()
             train_epoch._module_stats['kg_total'] += kg_completed.numel()
         
-        # 收集文本来源
         if output.get("text_sources") is not None:
             for src in output["text_sources"]:
                 if src in train_epoch._module_stats['text_sources']:
                     train_epoch._module_stats['text_sources'][src] += 1
         
-        # 收集MolToken互补性
         if output.get("moltoken_complementarity") is not None:
             train_epoch._module_stats['moltoken_complementarity'].append(
                 output["moltoken_complementarity"].mean().item()
@@ -1058,12 +874,10 @@ def train_epoch(
                 f"RDrop:{rdrop_val:.4f} Contr:{contrast_val:.4f} | GN:{grad_norm:.2f}"
             )
     
-    # 汇总分区权重
     if epoch_partition_weights and partition_weights_history is not None:
         all_weights = torch.cat(epoch_partition_weights, dim=0)  # (N, M)
         avg_weights = all_weights.mean(dim=0).numpy()  # (M,)
         if epoch_partition_modal_names is None:
-            # fallback（尽量不破坏旧逻辑）
             if avg_weights.shape[0] == 3:
                 epoch_partition_modal_names = ["struct", "kg", "text"]
             elif avg_weights.shape[0] == 4:
@@ -1077,13 +891,10 @@ def train_epoch(
     
     probs_t = torch.cat(all_probs, dim=0)
     labels_t = torch.cat(all_labels, dim=0)
-    # DDP 汇总
     probs_np = all_gather_concat(probs_t).numpy()
     labels_np = all_gather_concat(labels_t).numpy()
     
-    # 根据任务类型选择指标
     if is_regression:
-        # 关键反标准化以报告原始尺度的 RMSE
         if normalizers is not None and len(normalizers) > 0 and normalizers[0] is not None:
             for i, norm in enumerate(normalizers):
                 if norm is not None and i < probs_np.shape[1]:
@@ -1093,22 +904,18 @@ def train_epoch(
     else:
         train_metrics = compute_metrics(labels_np, probs_np)
     
-    # ========= 打印模块统计信息 =========
     if hasattr(train_epoch, '_module_stats'):
         stats = train_epoch._module_stats
-        print("\n 模态融合状态:")
+        print("\n Modality fusion:")
         
-        # KG 补全比例
         kg_completed = stats['kg_completed']
         kg_total = stats['kg_total']
         if kg_total > 0:
             kg_rate = kg_completed / kg_total * 100
-            print(f"   ┌─ KG 补全统计───────────────────────────┐")
-            print(f"   │ KG(真实): {100-kg_rate:.0f}% 样本")
-            print(f"   │ KG(缺失): {kg_rate:.0f}% 样本 (用零向量)")
-            print(f"   └──────────────────────────────────────────┘")
+            print("   KG completion")
+            print(f"   KG present: {100-kg_rate:.0f}% of samples")
+            print(f"   KG missing: {kg_rate:.0f}% of samples (zero vector)")
         
-        # 文本来源分布
         text_src = stats['text_sources']
         total_text = sum(text_src.values())
         if total_text > 0:
@@ -1116,21 +923,18 @@ def train_epoch(
             drug_txt = text_src.get('drug_text', 0)
             smiles_der = text_src.get('smiles_derived', 0)
             no_txt = text_src.get('none', 0)
-            print(f"   文本来源: KG关系={kg_rel} 药物描述={drug_txt} SMILES衍生={smiles_der} 无={no_txt}")
+            print(f"   Text source: kg={kg_rel} drug={drug_txt} smiles={smiles_der} none={no_txt}")
         
-        # MolToken-Structure互补性（核心指标）
         if stats['moltoken_complementarity']:
             avg_comp = sum(stats['moltoken_complementarity']) / len(stats['moltoken_complementarity'])
-            # 互补性评价
             if avg_comp > 0.7:
-                comp_eval = "优秀 两模态学习了不同信息"
+                comp_eval = "high, the two modalities differ"
             elif avg_comp > 0.4:
-                comp_eval = "良好 有一定互补"
+                comp_eval = "moderate complementarity"
             else:
-                comp_eval = "需关注 可能存在冗余"
-            print(f"   Structure-MolToken互补性: {avg_comp:.2f} ({comp_eval})")
+                comp_eval = "low, the modalities may overlap"
+            print(f"   Structure-MolToken complementarity: {avg_comp:.2f} ({comp_eval})")
         
-        # 落盘：KG补全解释（JSONL，便于后处理画图）
         if explain_dir is not None and is_main_process():
             try:
                 os.makedirs(explain_dir, exist_ok=True)
@@ -1140,11 +944,10 @@ def train_epoch(
                     with open(out_path, "w", encoding="utf-8") as f:
                         for rec in samples:
                             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-                    print(f"    KG解释已保存: {out_path} (n={len(samples)})")
+                    print(f"    Saved KG explanations: {out_path} (n={len(samples)})")
             except Exception as e:
-                print(f"    KG解释保存失败: {e}")
+                print(f"    Failed to save KG explanations: {e}")
         
-        # 重置统计
         train_epoch._module_stats = {
             'kg_completed': 0, 'kg_total': 0,
             'text_sources': {'kg_relation': 0, 'drug_text': 0, 'smiles_derived': 0, 'none': 0},
@@ -1152,7 +955,6 @@ def train_epoch(
             'kg_explain_samples': [],
         }
     
-    # 根据任务类型返回不同指标
     result = {
         "loss": loss_meter.get_average(),
         "main_loss": main_loss_meter.get_average(),
@@ -1171,29 +973,24 @@ def train_epoch(
 
 
 def evaluate(model, loader, device, use_tta=False, tta_times=5, use_bf16_autocast=True):
-    """评估模型，支持 TTA (Test-Time Augmentation)"""
+    
     model.eval()
     all_probs = []
     all_labels = []
-    # 关键修复评估时也要用 autocast，否则 BF16 模型权重遇到 FP32 输入会崩溃
     with torch.no_grad(), torch.amp.autocast('cuda', enabled=use_bf16_autocast, dtype=torch.bfloat16):
         for drug, label in loader:
             drug = ToDevice(drug, device)
             label = label.to(device).float()
             
             if use_tta:
-                # TTA测试时增强：多次预测取平均
-                # 1. 原始 SMILES
                 out_orig, _ = model(drug, augment_smiles=False)
                 probs_sum = torch.sigmoid(out_orig["classification"])
                 
-                # 2. 增强 SMILES (N次)
                 actual_tta = max(1, tta_times - 1)
                 for _ in range(actual_tta):
                     out_aug, _ = model(drug, augment_smiles=True)
                     probs_sum += torch.sigmoid(out_aug["classification"])
                 
-                # 平均
                 probs = probs_sum / float(1 + actual_tta)
             else:
                 output, _ = model(drug)
@@ -1208,18 +1005,11 @@ def evaluate(model, loader, device, use_tta=False, tta_times=5, use_bf16_autocas
     return compute_metrics(labels, probs)
 
 
-# ========= 回归任务评估=========
 def evaluate_regression(model, loader, device, normalizers=None, use_tta=False, tta_times=5, use_bf16_autocast=True):
     """
-    回归任务评估函数
     
-    与分类评估的区别：
-    1. 不使用 sigmoid，直接输出预测值
-    2. 使用 RMSE/MAE/R² 指标而非 AUC
-    3. 支持反标准化以报告原始尺度的 RMSE
     
     Args:
-        normalizers: List[Normalizer] 用于反标准化预测值和标签
     """
     model.eval()
     all_preds = []
@@ -1231,9 +1021,8 @@ def evaluate_regression(model, loader, device, normalizers=None, use_tta=False, 
             label = label.to(device).float()
             
             if use_tta:
-                # TTA: 多次预测取平均
                 out_orig, _ = model(drug, augment_smiles=False)
-                preds_sum = out_orig["classification"]  # 回归任务：直接用 logits
+                preds_sum = out_orig["classification"]
                 
                 actual_tta = max(1, tta_times - 1)
                 for _ in range(actual_tta):
@@ -1243,7 +1032,7 @@ def evaluate_regression(model, loader, device, normalizers=None, use_tta=False, 
                 preds = preds_sum / float(1 + actual_tta)
             else:
                 output, _ = model(drug)
-                preds = output["classification"]  # 回归任务：直接用 logits
+                preds = output["classification"]
             
             all_preds.append(preds.detach().float().cpu())
             all_labels.append(label.detach().cpu())
@@ -1253,14 +1042,11 @@ def evaluate_regression(model, loader, device, normalizers=None, use_tta=False, 
     preds = all_gather_concat(preds_t).numpy()
     labels = all_gather_concat(labels_t).numpy()
     
-    # 关键反标准化以报告原始尺度的 RMSE
     if normalizers is not None and len(normalizers) > 0 and normalizers[0] is not None:
         for i, norm in enumerate(normalizers):
             if norm is not None and i < preds.shape[1]:
-                # 反标准化：pred_orig = pred_norm * std + mean
                 preds[:, i] = norm.denorm(torch.tensor(preds[:, i])).numpy()
                 labels[:, i] = norm.denorm(torch.tensor(labels[:, i])).numpy()
-        # 调试确认反标准化已执行
         if len(normalizers) > 0 and normalizers[0] is not None:
             logger.info(f"[Eval]  Denormalized: mean={normalizers[0].mean:.4f}, std={normalizers[0].std:.4f}")
     else:
@@ -1271,15 +1057,12 @@ def evaluate_regression(model, loader, device, normalizers=None, use_tta=False, 
 
 def save_partition_heatmap(partition_weights_history: List[Dict], save_path: str):
     """
-    可视化保存分区权重热力图
     
-    展示训练过程中 Structure / KG / Text 三个模态的贡献比例变化
     """
     if not MATPLOTLIB_AVAILABLE or not partition_weights_history:
         return
     
     epochs = [d["epoch"] for d in partition_weights_history]
-    # 动态支持 3/4/... 个模态（例如 struct/tokenmol/kg/text）
     modal_names = partition_weights_history[0].get("modal_names", None)
     if not modal_names:
         modal_names = [k for k in partition_weights_history[0].keys() if k not in {"epoch"}]
@@ -1290,9 +1073,7 @@ def save_partition_heatmap(partition_weights_history: List[Dict], save_path: str
     
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
     
-    # 子图 1: 堆叠面积图
     series = [weights_by_modal[m] for m in modal_names]
-    # 自动配色：按模态数生成
     cmap = plt.get_cmap('tab10')
     colors = [cmap(i % 10) for i in range(len(modal_names))]
     ax1.stackplot(epochs, *series, labels=modal_names, colors=colors, alpha=0.8)
@@ -1304,7 +1085,6 @@ def save_partition_heatmap(partition_weights_history: List[Dict], save_path: str
     ax1.set_ylim(0, 1)
     ax1.grid(True, alpha=0.3)
     
-    # 子图 2: 热力图
     data = np.array(series)
     im = ax2.imshow(data, aspect='auto', cmap='YlOrRd', vmin=0, vmax=0.6)
     ax2.set_yticks(list(range(len(modal_names))))
@@ -1312,7 +1092,6 @@ def save_partition_heatmap(partition_weights_history: List[Dict], save_path: str
     ax2.set_xlabel('Epoch', fontsize=12)
     ax2.set_title('Modal Weights Heatmap', fontsize=14)
     
-    # 设置 x 轴刻度
     tick_positions = np.linspace(0, len(epochs)-1, min(10, len(epochs))).astype(int)
     ax2.set_xticks(tick_positions)
     ax2.set_xticklabels([epochs[i] for i in tick_positions])
@@ -1328,31 +1107,22 @@ def save_partition_heatmap(partition_weights_history: List[Dict], save_path: str
 
 class ImprovedEarlyStopping:
     """
-    改进的早停策略：以Test AUC为准！
-    - 主要监控 Test AUC（用户明确要求）
-    - 同时记录 Val AUC 作为参考
-    - 新增热身期：前 warmup_epochs 个 epoch 不计入早停
-    - 新增相对改进：支持相对改进阈值（如 0.5%）
-    - 修复支持回归任务（指标是 -RMSE，越大越好，初始化为 -inf）
     """
     def __init__(self, patience=10, min_delta=0.001, filename="best.pt", warmup_epochs=15, is_regression=False):
         self.patience = patience
         self.min_delta = min_delta
         self.filename = filename
-        self.warmup_epochs = warmup_epochs  # 热身期不触发早停
+        self.warmup_epochs = warmup_epochs
         self.counter = 0
         self.is_regression = is_regression
-        # 修复回归任务用负无穷初始化（因为指标是 -RMSE，越大越好）
         self.best_val = float('-inf') if is_regression else 0.0
         self.best_test = float('-inf') if is_regression else 0.0
         self.best_epoch = 0
         self.best_state = None
         
     def step(self, val_auc, test_auc, model, epoch):
-        # 热身期：只记录最佳，不计数早停
         in_warmup = epoch <= self.warmup_epochs
         
-        # 用户要求以 Test AUC 为决策指标
         current_test = float(test_auc) if test_auc is not None else 0.0
         
         if current_test > self.best_test + self.min_delta:
@@ -1361,20 +1131,16 @@ class ImprovedEarlyStopping:
             self.best_epoch = epoch
             self.best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
             self.counter = 0
-            # 修复回归任务显示 RMSE（取绝对值），分类任务显示 AUC
             if self.is_regression:
                 print(f"    New Best! Test RMSE={abs(current_test):.4f} (Val RMSE={abs(val_auc):.4f})")
             else:
                 print(f"    New Best! Test={current_test:.4f} (Val={val_auc:.4f})")
-            # 新增每次有新最优时立即保存
             self.save_best()
             return False
         else:
-            # 修复回归任务显示 RMSE（取绝对值）
             display_best = abs(self.best_test) if self.is_regression else self.best_test
             metric_name = "RMSE" if self.is_regression else "AUC"
             if in_warmup:
-                # 热身期内不计数
                 print(f"    Warmup {epoch}/{self.warmup_epochs} (Best Test {metric_name}={display_best:.4f})")
             else:
                 self.counter += 1
@@ -1389,7 +1155,7 @@ class ImprovedEarlyStopping:
         return self.best_val, self.best_test, self.best_epoch
     
     def save_best(self):
-        """保存最优模型到文件"""
+        
         if self.best_state is not None and self.filename:
             import os
             os.makedirs(os.path.dirname(self.filename) or ".", exist_ok=True)
@@ -1415,7 +1181,6 @@ def train(args, return_results=False):
     from utils.paths import expand_asset_paths
     cfg = expand_asset_paths(json.load(open(args.config_path)))
     
-    # CLI覆盖Config
     if hasattr(args, "lora_r"):
         logger.info(f"Overriding lora_rank from CLI: {args.lora_r}")
         cfg["network"]["lora_rank"] = args.lora_r
@@ -1427,18 +1192,15 @@ def train(args, return_results=False):
         cfg["network"]["adapter_dropout"] = args.dropout
         
     dataset, train_loader, val_loader, test_loader = build_loaders(args, cfg)
-    # 分布式时每进程绑定一张卡
     if getattr(args, "distributed", False):
         device = torch.device(f"cuda:{args.local_rank}")
     else:
         device = torch.device(args.device)
     num_tasks = len(dataset.targets)
 
-    # ========= 自动检测任务类型=========
     is_regression = is_regression_task(args.dataset_name)
     if is_regression:
         logger.info(f" Detected REGRESSION task: {args.dataset_name}")
-        # 自动设置回归损失类型（如果用户没有显式指定 mse/mae/huber）
         if args.loss_type.lower() not in ["mse", "mae", "huber"]:
             logger.info(f"   Auto-switching loss_type from '{args.loss_type}' to 'mse'")
             args.loss_type = "mse"
@@ -1447,13 +1209,8 @@ def train(args, return_results=False):
         logger.info(f" Detected CLASSIFICATION task: {args.dataset_name}")
         logger.info(f"   Loss: {args.loss_type.upper()}, Metric: AUC")
 
-    # ========= 解释性输出目录（KG补全可视化用）=========
-    # 与 checkpoint 同级，默认: <dirname(output_path)>/explain/
     explain_dir = os.path.join(os.path.dirname(args.output_path) or ".", "explain")
 
-    # ========= per-task pos_weight（训练集统计）=========
-    # raw label 编码：>0 表示正类，<0 表示负类，=0 表示缺失（由 prepare_labels 里的 mask=abs(y)>0 控制）
-    # pos_weight[t] = neg_t / pos_t，用于 BCEWithLogitsLoss 的 pos_weight（按 task 处理类别不平衡）
     logger.info("Computing per-task pos_weight from training set...")
     pos_counts = torch.zeros(num_tasks, dtype=torch.float64)
     neg_counts = torch.zeros(num_tasks, dtype=torch.float64)
@@ -1462,7 +1219,6 @@ def train(args, return_results=False):
         m = (y.abs() > 0)
         pos_counts += ((y > 0) & m).sum(dim=0).double()
         neg_counts += ((y < 0) & m).sum(dim=0).double()
-    # 避免除零：pos=0 的 task，pos_weight 设为 1（loss 不再硬放大）
     pos_weight = (neg_counts / (pos_counts.clamp(min=1.0))).clamp(min=1.0, max=50.0).to(dtype=torch.float32)
     if is_main_process():
         nz = int((pos_counts > 0).sum().item())
@@ -1471,13 +1227,10 @@ def train(args, return_results=False):
             f"min={pos_weight.min().item():.2f}, max={pos_weight.max().item():.2f}"
         )
 
-    # ========= 全局 KGE bank（用于“稀疏注意力 KG 补全”，KEDD 风格）=========
-    # dataset.kge 来自 embedding.pkl，是离线预训练向量：作为 memory bank 固定输入，不训练。
     kge_bank = None
     kge_keys = None
     try:
         if hasattr(dataset, "kge") and isinstance(dataset.kge, dict) and len(dataset.kge) > 0:
-            # BMKG-DP 的实体 id 通常以 'D' 开头表示 drug
             keys = sorted([k for k in dataset.kge.keys() if isinstance(k, str) and k and k[0] == "D"])
             if not keys:
                 keys = sorted([k for k in dataset.kge.keys() if isinstance(k, str)])
@@ -1490,7 +1243,6 @@ def train(args, return_results=False):
     except Exception as e:
         logger.warning(f"[KGE] Failed to build global bank: {e}. KG completion will be disabled.")
 
-    # 计算训练集 KG 的均值，用于初始化 kg_prototype
     kg_prototype_init = None
     logger.info("Computing KG prototype from training set...")
     kg_embeddings = []
@@ -1499,7 +1251,6 @@ def train(args, return_results=False):
             kg = drug["kg"]
             if kg.dim() == 3:
                 kg = kg.squeeze(1)
-            # 过滤掉缺失的 KG (全零或 NaN)
             valid_mask = (kg.abs().sum(dim=-1) > 1e-6) & (~torch.isnan(kg.sum(dim=-1)))
             if valid_mask.any():
                 kg_embeddings.append(kg[valid_mask])
@@ -1510,8 +1261,6 @@ def train(args, return_results=False):
     else:
         logger.warning("No valid KG embeddings found, using random initialization")
 
-    # ========= 设备对齐（关键）：让 Qwen / Token-Mol 跟随 args.device（例如 cuda:4）=========
-    # 你不希望在 config 里手动改 device（cuda:0/4），这里统一以命令行 --device 为准。
     try:
         cfg["network"]["llm"]["device"] = str(args.device)
     except Exception:
@@ -1522,9 +1271,8 @@ def train(args, return_results=False):
     except Exception:
         pass
 
-    # 重要传递 dataset_name 和 task_names 给模型
     cfg["network"]["dataset_name"] = args.dataset_name
-    cfg["network"]["task_names"] = dataset.targets  # 任务名称列表，用于 Task-Aware Prompting
+    cfg["network"]["task_names"] = dataset.targets
     
     net_cfg_ref = cfg.get("network", cfg)
     if getattr(args, "ablation", ""):
@@ -1539,8 +1287,6 @@ def train(args, return_results=False):
         kge_keys=kge_keys,
     ).to(device)
     if getattr(args, "distributed", False):
-        # static_graph=True: 解决 DDP + gradient checkpointing 兼容性问题
-        # 告诉 DDP 计算图在训练过程中不变，允许处理 checkpointing 的多次 backward
         model = DDP(model, device_ids=[args.local_rank], output_device=args.local_rank, 
                     find_unused_parameters=True, static_graph=True)
     lora_frozen = False
@@ -1548,9 +1294,6 @@ def train(args, return_results=False):
         model.set_lora_trainable(False)
         lora_frozen = True
 
-    # ========= 混合精度稳定性分类头强制保持 FP32 =========
-    # 原理：Qwen 用 BF16 加速，但分类头是"最后一公里"，需要 FP32 精度
-    # 这样可以避免 dtype mismatch 和数值不稳定
     m = model.module if isinstance(model, DDP) else model
     fp32_module_names = ['pooler', 'head_layer1', 'se_block', 'head_layer2', 'head_output', 'head_residual_proj']
     for name in fp32_module_names:
@@ -1558,26 +1301,20 @@ def train(args, return_results=False):
             getattr(m, name).float()
     logger.info(f"[MixedPrecision] Classification head forced to FP32: {fp32_module_names}")
     
-    # ========= 稳定性：GraphMVP 部分解冻（最后 K 层）=========
-    # 改进：完全冻结会限制表征能力，部分解冻让最后几层适应下游任务
-    # --unfreeze_graphmvp_layers N: 解冻最后 N 层 (默认 0 = 全冻结, 2 = 解冻最后2层)
     unfreeze_layers = int(getattr(args, "unfreeze_graphmvp_layers", 0))
     if bool(getattr(args, "freeze_structure_encoder", False)):
         if hasattr(m, "structure_encoder") and hasattr(m.structure_encoder, "parameters"):
-            # 获取 GraphMVP 的内部模型
             enc = m.structure_encoder
             main_model = getattr(enc, "main_model", None)
             
             if main_model is not None and hasattr(main_model, "gnns"):
                 num_layers = len(main_model.gnns)
-                freeze_until = num_layers - unfreeze_layers  # 冻结到这一层
+                freeze_until = num_layers - unfreeze_layers
                 
-                # 冻结 embedding 层（始终冻结）
                 for name, p in main_model.named_parameters():
                     if "x_embedding" in name:
                         p.requires_grad = False
                 
-                # 冻结前 freeze_until 层
                 for i, (gnn, bn) in enumerate(zip(main_model.gnns, main_model.batch_norms)):
                     if i < freeze_until:
                         for p in gnn.parameters():
@@ -1585,13 +1322,11 @@ def train(args, return_results=False):
                         for p in bn.parameters():
                             p.requires_grad = False
                     else:
-                        # 解冻最后几层
                         for p in gnn.parameters():
                             p.requires_grad = True
                         for p in bn.parameters():
                             p.requires_grad = True
                 
-                # 冻结 projector（如果有）
                 if hasattr(enc, "projector") and enc.projector is not None:
                     for p in enc.projector.parameters():
                         p.requires_grad = False
@@ -1599,7 +1334,6 @@ def train(args, return_results=False):
                 trainable = sum(p.numel() for p in enc.parameters() if p.requires_grad)
                 logger.info(f"[GraphMVP] Partial freeze: layers 0-{freeze_until-1} frozen, layers {freeze_until}-{num_layers-1} trainable ({trainable/1e6:.2f}M params)")
             else:
-                # fallback: 全冻结
                 for p in enc.parameters():
                     p.requires_grad = False
                 logger.info("[Freeze] structure_encoder fully frozen (fallback)")
@@ -1618,19 +1352,17 @@ def train(args, return_results=False):
                 pass
             logger.info("[Freeze] kg_reconstructor frozen (stability)")
     
-    # ========= 分组学习率（5组：main/routing/lora/struct/kg）=========
     lr_struct_mult = float(getattr(args, "lr_struct_mult", 0.1))
     lr_kg_mult = float(getattr(args, "lr_kg_mult", 0.1))
     lr_lora_mult = float(getattr(args, "lr_lora_mult", 1.0))
-    lr_routing_mult = float(getattr(args, "lr_amrg_mult", 10.0))  # 新模块参数用 10x LR
+    lr_routing_mult = float(getattr(args, "lr_amrg_mult", 10.0))
     
     main_params = []
-    routing_params = []   # MIL + 可学习标量（新初始化，需要高 LR）
+    routing_params = []
     struct_params = []
     kg_params = []
     lora_params = []
     
-    # 新初始化参数的关键词（需要高 LR）
     routing_keywords = {
         "attn_pool_ratio", "pred_conf_gate",
     }
@@ -1657,9 +1389,6 @@ def train(args, return_results=False):
     if main_params:
         param_groups.append({"params": main_params, "lr": float(args.lr), "weight_decay": float(args.weight_decay)})
     if routing_params:
-        # 路由模块参数用高 LR + 低 weight_decay
-        # 高 LR：新初始化参数需要快速学习
-        # 低 WD：防止 weight_decay 拉回初始值（尤其是标量参数）
         param_groups.append({"params": routing_params, "lr": float(args.lr) * lr_routing_mult, "weight_decay": 0.01})
     if lora_params:
         param_groups.append({"params": lora_params, "lr": float(args.lr) * lr_lora_mult, "weight_decay": float(args.weight_decay) * 0.5})
@@ -1682,25 +1411,21 @@ def train(args, return_results=False):
     
     steps_per_epoch = len(train_loader)
     total_steps = steps_per_epoch * args.epochs
-    warmup_steps = steps_per_epoch * 5  # warmup 5个epoch
+    warmup_steps = steps_per_epoch * 5
     
-    # Cosine Decay + Warmup (更温和的衰减，适合多模态)
     step_counter = {"value": 0}
-    min_lr_ratio = 0.2  # 提高最低学习率，保持学习能力
+    min_lr_ratio = 0.2
 
     def lr_lambda(current_step):
         step = step_counter["value"]
         step_counter["value"] += 1
         
         if step < warmup_steps:
-            # Warmup 阶段：从 20% 线性增长到 100%
             return 0.2 + 0.8 * (step / warmup_steps)
         
-        # Cosine Decay 阶段：更温和的衰减
         decay_steps = total_steps - warmup_steps
         progress = (step - warmup_steps) / max(decay_steps, 1)
         progress = min(max(progress, 0.0), 1.0)
-        # Cosine 衰减比 Linear 更温和，后期保留更多学习能力
         return min_lr_ratio + (1.0 - min_lr_ratio) * 0.5 * (1.0 + np.cos(np.pi * progress))
     
     warm_scheduler = LambdaLR(optimizer, lr_lambda)
@@ -1709,9 +1434,7 @@ def train(args, return_results=False):
         f"total_steps={total_steps}, min_lr_ratio={min_lr_ratio}"
     )
     
-    # ========= AMP 策略（关键修复）=========
     # - FP16: autocast + GradScaler
-    # - BF16: autocast( BF16 ) + 不使用 GradScaler（否则会报 unscale_ 不支持 BF16）
     amp_dtype = torch.float16
     if bool(args.amp):
         dtype_str = str(cfg.get("network", {}).get("llm", {}).get("torch_dtype", "float16")).lower()
@@ -1721,32 +1444,22 @@ def train(args, return_results=False):
     
     ema = None
     
-    # 稳定版v2早停策略
-    # 诊断结论：
-    # 1. Best @ Epoch 9，说明模型早期就能学到有用特征
-    # 2. 之后持续过拟合，Gap 从 -0.06 恶化到 +0.19
-    # 优化：
-    # - warmup_epochs=5：更早开始评估
-    # - min_delta=0.003：稍微放宽改进阈值
     stopper = ImprovedEarlyStopping(
-        patience=args.patience,  # 从命令行获取 (25)
-        min_delta=0.003,  # 放宽改进检测阈值
+        patience=args.patience,
+        min_delta=0.003,
         filename=args.output_path,
-        warmup_epochs=5,  # 缩短到 5（与 LR warmup 一致）
-        is_regression=is_regression  # 修复回归任务支持
+        warmup_epochs=5,
+        is_regression=is_regression
     )
 
     if is_main_process():
         logger.info(f" Training Start | Epochs={args.epochs} BS(per_gpu)={args.batch_size} LR={args.lr} WD={args.weight_decay} world={get_world_size()}")
     
-    # 损失优化初始化动态损失调度器
     loss_scheduler = DynamicLossScheduler(total_epochs=args.epochs)
     
-    # 可视化分区权重历史
     partition_weights_history = []
 
     for epoch in range(1, args.epochs + 1):
-        # 让模型 forward 知道当前 epoch（用于 modality_dropout / align warmup 门控）
         try:
             model.current_epoch = int(epoch)
         except Exception:
@@ -1756,15 +1469,9 @@ def train(args, return_results=False):
             print(f"Epoch {epoch}/{args.epochs} | LR={optimizer.param_groups[0]['lr']:.2e} | world={get_world_size()}")
             print(f"{'='*60}")
         
-        # 优化检查是否使用 Uncertainty Weighting
         use_uw = hasattr(model, 'uncertainty_weighting') and model.use_uncertainty_weighting
         
-        # 关键修复禁用 Mixup
-        # 诊断结论：Best Test AUC 在 Epoch 19 (无 Mixup 阶段) 达到
-        # 说明 Mixup 对 SIDER 数据集弊大于利，可能因为：
-        # 1. 数据集太小 (~1400)，Mixup 引入的噪声破坏了有限的真实信号
-        # 2. 副作用预测是多标签任务，Mixup 混合标签会产生歧义
-        current_mixup = 0.0  # 完全禁用 Mixup
+        current_mixup = 0.0
 
         train_stats = train_epoch(
             model,
@@ -1783,8 +1490,8 @@ def train(args, return_results=False):
             partition_weights_history=partition_weights_history,
             use_uncertainty_weighting=use_uw,
             use_focal_loss=True,
-            ema=ema,  # EMA传入 EMA 对象
-            accumulation_steps=args.accumulation_steps,  # 梯度累积
+            ema=ema,
+            accumulation_steps=args.accumulation_steps,
             pos_weight=pos_weight.to(device),
             max_grad_norm=float(args.max_grad_norm),
             loss_type=str(args.loss_type),
@@ -1794,24 +1501,17 @@ def train(args, return_results=False):
             use_rdrop=bool(getattr(args, "use_rdrop", False)),
             explain_dir=explain_dir,
             explain_max_samples=200,
-            is_regression=is_regression,  # 回归任务支持
-            normalizers=getattr(dataset, 'normalizer', None) if is_regression else None,  # 回归任务反标准化
+            is_regression=is_regression,
+            normalizers=getattr(dataset, 'normalizer', None) if is_regression else None,
         )
 
         if lora_frozen and epoch == args.lora_freeze_epochs:
             model.set_lora_trainable(True)
             lora_frozen = False
 
-        # 简化直接评估，不使用 EMA
-        # DDP 下评估每进程都跑一份子集，最后 gather 汇总
-        # ========== 评估策略（稳定性优先）==========
-        # - per-epoch 默认使用 no-TTA（更稳定、可复现）
-        # - 若加 --eval_tta_each_epoch，则额外计算 TTA 指标（更接近最终，但更噪声/更慢）
         
-        # 根据任务类型选择评估函数
         primary_metric = "rmse" if is_regression else "roc_auc"
         
-        # 获取回归任务的 normalizers（用于反标准化）
         normalizers = getattr(dataset, 'normalizer', None) if is_regression else None
         
         if is_regression:
@@ -1825,7 +1525,6 @@ def train(args, return_results=False):
             else:
                 val_metrics_tta = evaluate(model, val_loader, device, use_tta=True, tta_times=3)
 
-        # 默认不每轮评估 Test（避免 test 泄漏）；只在 Val 变好时才评估 Test，或用户显式开启
         test_metrics = None
         test_metrics_tta = None
         eval_test_each_epoch = bool(getattr(args, "eval_test_each_epoch", False))
@@ -1834,7 +1533,6 @@ def train(args, return_results=False):
         if eval_test_each_epoch:
             should_eval_test = True
         elif is_regression:
-            # 回归任务：RMSE 越小越好，用负值比较
             if (-val_metrics["rmse"]) > (-stopper.best_val) + stopper.min_delta:
                 should_eval_test = True
         elif eval_test_on_improve and (val_metrics["roc_auc"] > stopper.best_val + stopper.min_delta):
@@ -1849,20 +1547,16 @@ def train(args, return_results=False):
                 if bool(getattr(args, "eval_tta_each_epoch", False)):
                     test_metrics_tta = evaluate(model, test_loader, device, use_tta=True, tta_times=5)
         
-        # 损失优化更新历史记录（以 Val 作为泛化指标，避免 test 泄漏）
         if is_regression:
-            # 回归任务：使用负 RMSE 作为"越大越好"的指标
             loss_scheduler.update_history(-train_stats.get('rmse', 0), -val_metrics['rmse'])
         else:
             loss_scheduler.update_history(train_stats['roc_auc'], val_metrics['roc_auc'])
 
-        # (使用纯 CosineDecay, 无 plateau_scheduler)
         
         if is_main_process():
             print(f"\n Epoch {epoch} Summary:")
             
             if is_regression:
-                # 回归任务日志
                 val_rmse_std = float(val_metrics.get("rmse_std", 0.0))
                 test_rmse_std = float(test_metrics.get("rmse_std", 0.0)) if test_metrics is not None else 0.0
                 
@@ -1875,7 +1569,6 @@ def train(args, return_results=False):
                 else:
                     print(f"   Test: RMSE={test_metrics['rmse']:.4f}±{test_rmse_std:.4f} | MAE={test_metrics['mae']:.4f} | R²={test_metrics['r2']:.4f}")
             else:
-                # 分类任务日志（原有逻辑）
                 gap_val = train_stats['roc_auc'] - val_metrics['roc_auc']
                 gap_test = None if test_metrics is None else (train_stats['roc_auc'] - test_metrics['roc_auc'])
                 
@@ -1896,7 +1589,6 @@ def train(args, return_results=False):
                 else:
                     print(f"   Test: AUC={test_metrics['roc_auc']:.4f}±{test_auc_std:.4f}")
                 print(f"   Gap:  Train-Val={gap_val:.4f}" + (f" Train-Test={gap_test:.4f}" if gap_test is not None else ""))
-            # 解释性：打印当前 epoch 的平均模态权重（来自 PSPP）
             try:
                 if partition_weights_history:
                     last = partition_weights_history[-1]
@@ -1933,10 +1625,8 @@ def train(args, return_results=False):
             logger.info(msg)
         
         if is_main_process():
-            # 保存/早停只在 rank0 做
             save_model = model.module if hasattr(model, "module") else model
             if is_regression:
-                # 回归任务：RMSE 越小越好，传负值给早停器
                 stopper_val = -val_metrics["rmse"]
                 stopper_test = None if test_metrics is None else -test_metrics["rmse"]
             else:
@@ -1949,7 +1639,6 @@ def train(args, return_results=False):
                 stop_flag = False
         else:
             stop_flag = False
-        # 广播 stop_flag
         if is_dist():
             flag = torch.tensor([1 if stop_flag else 0], device=device, dtype=torch.int)
             dist.broadcast(flag, src=0)
@@ -1960,16 +1649,13 @@ def train(args, return_results=False):
     real_model = model.module if hasattr(model, "module") else model
     best_val, best_test, best_epoch = stopper.load_best(real_model)
     
-    # 修复保存最优模型到文件
     if is_main_process():
         stopper.save_best()
     
-    # 可视化保存分区权重热力图
     if partition_weights_history and is_main_process():
         heatmap_path = args.output_path.replace(".pt", "_partition_heatmap.png")
         save_partition_heatmap(partition_weights_history, heatmap_path)
     
-    # 最终测试：只在加载“best val checkpoint”后跑一次 Test（严格）
     final_metrics = evaluate(model, test_loader, device, use_tta=True, tta_times=5)
     
     if is_main_process():
@@ -2000,20 +1686,20 @@ def parse_args():
     )
     parser.add_argument("--device", type=str, default="cuda:4")
     parser.add_argument("--batch_size", type=int, default=16)
-    parser.add_argument("--accumulation_steps", type=int, default=1, help="梯度累积步数")
+    parser.add_argument("--accumulation_steps", type=int, default=1, help="Gradient accumulation steps")
     parser.add_argument("--epochs", type=int, default=80)
-    parser.add_argument("--lr", type=float, default=5e-5)  # 优化从 2e-5 提升到 5e-5（LoRA 微调推荐 2e-4，但考虑多模态稳定性用 5e-5）
+    parser.add_argument("--lr", type=float, default=5e-5)
     parser.add_argument("--weight_decay", type=float, default=0.05)
     parser.add_argument("--patience", type=int, default=15)
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--seeds", type=str, default="", help="多种子运行，逗号分隔，如 '42,123,456'")
+    parser.add_argument("--seeds", type=str, default="", help="Comma-separated seeds, for example 42,123,456")
     parser.add_argument("--output_path", type=str, default="ckpts/dp/model.pt")
     parser.add_argument("--label_smoothing", type=float, default=0.0)
     parser.add_argument("--max_grad_norm", type=float, default=1.0, help="Final grad clipping norm used for optimizer step.")
     parser.add_argument("--loss_type", type=str, default="bft", choices=["bft", "bce", "focal", "poly", "asl", "mse", "mae", "huber"], help="Main loss type for DP task. Classification: bft/bce/focal/poly/asl. Regression: mse/mae/huber.")
     parser.add_argument("--conf_calib_weight", type=float, default=0.05, help="Weight for confidence calibration loss (fusion_conf vs exp(-per-sample BCE)). V5.3: increased to 0.05 as primary confidence learning signal.")
-    parser.add_argument("--conf_loss_weight", type=float, default=0.1, help="创新Weight for confidence self-supervised loss (diversity + range + calibration).")
+    parser.add_argument("--conf_loss_weight", type=float, default=0.1, help="Weight for the confidence self-supervised loss.")
     parser.add_argument("--preclip_cap", type=float, default=50.0, help="Pre-clip cap for extreme gradient spikes (recommended). Use 0 to disable.")
     parser.add_argument("--log_grad_groups", action="store_true", help="Log top gradient-norm groups (llm/struct/kg/tokenmol/head/conf) to locate spikes.")
     parser.add_argument("--eval_test_each_epoch", action="store_true", help="Evaluate test set each epoch (NOT recommended; can cause test leakage during tuning).")
@@ -2032,7 +1718,7 @@ def parse_args():
     parser.add_argument("--lora_freeze_epochs", type=int, default=0)
     parser.add_argument("--lora_r", type=int, default=16, help="LoRA rank")
     parser.add_argument("--dropout", type=float, default=0.1, help="Hidden dropout prob")
-    parser.add_argument("--structure_mixup_alpha", type=float, default=0.2)  # 重启 Mixup
+    parser.add_argument("--structure_mixup_alpha", type=float, default=0.2)
     parser.add_argument("--amp", action="store_true")
     # DDP
     parser.add_argument("--local_rank", type=int, default=0)
@@ -2046,11 +1732,9 @@ def run_multi_seed(args):
     seeds = [int(s.strip()) for s in args.seeds.split(",")]
     results = {"val": [], "test": []}
     
-    # 保存原始输出路径
     base_output_path = args.output_path
     output_dir = os.path.dirname(base_output_path)
     
-    # 创建集成目录
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
     
@@ -2060,13 +1744,11 @@ def run_multi_seed(args):
         print(f"{'='*60}")
         args.seed = seed
         
-        # 为每个种子生成独立的输出路径
         if base_output_path.endswith(".pt"):
             args.output_path = base_output_path.replace(".pt", f"_seed{seed}.pt")
         else:
             args.output_path = f"{base_output_path}_seed{seed}.pt"
         
-        # 清理 GPU 内存
         import gc
         gc.collect()
         torch.cuda.empty_cache()
@@ -2077,7 +1759,6 @@ def run_multi_seed(args):
         
         print(f" Model seed={seed}: Val={val_auc:.4f}, Test={test_auc:.4f}")
     
-    # 计算统计量
     val_mean, val_std = np.mean(results["val"]), np.std(results["val"])
     test_mean, test_std = np.mean(results["test"]), np.std(results["test"])
     best_test = max(results["test"])
@@ -2089,7 +1770,7 @@ def run_multi_seed(args):
     print(f"   Test AUC:  {test_mean*100:.2f} ± {test_std*100:.2f}")
     print(f"   Best Test: {best_test*100:.2f}")
     print(f"{'='*60}")
-    print(f"\n 提示：运行集成评估获取更高分数：")
+    print("\n Ensemble evaluation:")
     print(f"   python tasks/mol_task/ensemble_eval.py --ensemble_dir {output_dir}")
     print(f"{'='*60}")
     

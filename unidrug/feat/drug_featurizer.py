@@ -822,7 +822,7 @@ SUPPORTED_SINGLE_SCALE_DRUG_FEATURIZER = {
     "ogb": DrugGraphFeaturizer,
     "MGNN": DrugMGNNFeaturizer,
     "BaseGNN": DrugGraphFeaturizer,
-    "graphmvp": DrugGraphFeaturizerV2,  # 添加graphmvp支持
+    "graphmvp": DrugGraphFeaturizerV2,
 }
 
 SUPPORTED_SINGLE_MODAL_DRUG_FEATURIZER = copy.deepcopy(SUPPORTED_SINGLE_SCALE_DRUG_FEATURIZER)

@@ -1,13 +1,15 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-预计算 DTI 数据集的 Token-Mol 3D Torsion Tokens
-================================================
-为 DTI 数据集（Yamanishi08, BMKG_DTI 等）预计算 MolToken
+Build the TokenMol 3D torsion cache for DTI drugs.
 
-用法：
-    python scripts/precompute_tokenmol_dti.py --dataset yamanishi08
-    python scripts/precompute_tokenmol_dti.py --all
+Writes cache/tokenmol_3d/tokenmol_3d_{dataset}.pkl. DTI training loads this
+file before the moltoken branch of CMSA and CMON.
+
+    python precompute_tokenmol_dti.py --dataset yamanishi08
+    python precompute_tokenmol_dti.py --dataset bmkg_dti
+    python precompute_tokenmol_dti.py --dataset human
+    python precompute_tokenmol_dti.py --all
 """
 
 import os
@@ -22,12 +24,10 @@ import multiprocessing as mp
 import time
 import signal
 
-# 添加项目路径
 PROJECT_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "unidrug"))
 
-# RDKit 相关
 try:
     from rdkit import Chem
     from rdkit.Chem import AllChem
@@ -37,7 +37,6 @@ except ImportError:
     RDKIT_AVAILABLE = False
     print("[WARNING] RDKit not available")
 
-# DTI 数据集路径
 DTI_DATASETS = {
     "yamanishi08": "unidrug/datasets/dti/Yamanishi08",
     "bmkg_dti": "unidrug/datasets/dti/BMKG_DTI",
@@ -46,7 +45,7 @@ DTI_DATASETS = {
 
 
 def load_tokenmol_vocab(vocab_file: str) -> Dict[str, int]:
-    """加载 TokenMol 词表"""
+    
     vocab = {}
     with open(vocab_file, 'r') as f:
         for i, line in enumerate(f):
@@ -58,7 +57,7 @@ def load_tokenmol_vocab(vocab_file: str) -> Dict[str, int]:
 
 
 def _tokenmol_tokenize_smiles(smiles: str, vocab: Dict[str, int]) -> List[str]:
-    """贪心最长匹配 Token-Mol 词表"""
+    
     if not smiles or not vocab:
         return ["[UNK]"]
     max_len = 6
@@ -84,7 +83,7 @@ def _tokenmol_tokenize_smiles(smiles: str, vocab: Dict[str, int]) -> List[str]:
 
 
 def _torsion_bins_rad_strict(smiles: str, max_torsions: int = 32) -> Optional[List[str]]:
-    """严格 3D 扭转角提取"""
+    
     if not smiles or not RDKIT_AVAILABLE:
         return None
     try:
@@ -133,7 +132,7 @@ def build_tokenmol_seq_strict(
     use_torsion: bool = True, 
     max_torsions: int = 32
 ) -> Optional[str]:
-    """构建 TokenMol 序列"""
+    
     smiles_tokens = _tokenmol_tokenize_smiles(smiles, vocab)
     if not smiles_tokens:
         return None
@@ -155,7 +154,7 @@ def _timeout_handler(signum, frame):
 
 
 def process_single_smiles(args) -> Tuple[int, str, Optional[str], float, Optional[str]]:
-    """处理单个 SMILES"""
+    
     idx, smiles, vocab, use_torsion, max_torsions, timeout_sec = args
     t0 = time.time()
     
@@ -189,7 +188,7 @@ def precompute_dti_dataset(
     num_workers: int = 8,
     timeout_sec: int = 60,
 ):
-    """预计算 DTI 数据集的 MolToken"""
+    
     import pandas as pd
     
     dataset_path = project_root / DTI_DATASETS.get(dataset_name.lower(), "")
@@ -199,7 +198,6 @@ def precompute_dti_dataset(
     
     smiles_list = []
     
-    # Human 数据集：从 CSV 文件加载
     if dataset_name.lower() == "human":
         for csv_file in ["train.csv", "val.csv", "test.csv"]:
             csv_path = dataset_path / csv_file
@@ -211,7 +209,6 @@ def precompute_dti_dataset(
             print(f"[ERROR] No SMILES found in human dataset")
             return
     else:
-        # 其他数据集：从 drug.json 加载 SMILES
         drug_json = dataset_path / "drug.json"
         if not drug_json.exists():
             print(f"[ERROR] drug.json not found: {drug_json}")
@@ -229,11 +226,9 @@ def precompute_dti_dataset(
     print(f"[INFO] Dataset: {dataset_name}")
     print(f"[INFO] Total SMILES: {len(smiles_list)}, unique SMILES: {len(unique_smiles)}")
     
-    # 加载词表
     vocab = load_tokenmol_vocab(vocab_file)
     print(f"[INFO] Vocab size: {len(vocab)}")
     
-    # 并行处理
     output_dir.mkdir(parents=True, exist_ok=True)
     output_file = output_dir / f"tokenmol_3d_{dataset_name.lower()}.pkl"
     failed_file = output_dir / f"tokenmol_3d_{dataset_name.lower()}_failed.txt"
@@ -258,7 +253,6 @@ def precompute_dti_dataset(
             else:
                 failed_list.append((smi, error))
     
-    # 保存结果
     with open(output_file, 'wb') as f:
         pickle.dump(results, f)
     
@@ -280,7 +274,7 @@ def main():
     parser.add_argument("--timeout", type=int, default=60)
     args = parser.parse_args()
     
-    project_root = Path(__file__).parent.parent
+    project_root = Path(__file__).resolve().parent
     output_dir = project_root / "cache" / "tokenmol_3d"
     vocab_file = project_root / "torsion_version" / "torsion_voc_property.csv"
     

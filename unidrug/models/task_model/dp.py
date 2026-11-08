@@ -36,25 +36,15 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
-# 模块级优化1Stochastic Depth (Layer Drop) - 防止过拟合
 # =============================================================================
 
 # =============================================================================
-# Feature Noise Injection - 训练时特征增强
 # =============================================================================
 
 class FeatureNoiseInjector(nn.Module):
     """
-    修复3特征级噪声注入 - R-Drop兼容版
     
-    关键修复：
-    - 使用确定性噪声（基于输入的hash）
-    - 确保R-Drop两次forward时噪声相同，避免差异放大导致梯度爆炸
-    - 重要正确保存/恢复CPU和CUDA的随机状态，不影响Dropout
     
-    原理：
-    - 在特征空间添加微小高斯噪声
-    - 迫使模型学习更鲁棒的表示
     """
     def __init__(self, noise_std: float = 0.1, adaptive: bool = True):
         super().__init__()
@@ -77,16 +67,13 @@ class FeatureNoiseInjector(nn.Module):
         with torch.no_grad():
             seed = int(x.sum().item() * 1e6) % (2**31)
         
-        # 修复正确保存CPU和CUDA的随机状态
         cpu_rng_state = torch.get_rng_state()
         cuda_rng_state = torch.cuda.get_rng_state() if x.is_cuda else None
         
-        # 创建独立的Generator，不影响全局状态
         gen = torch.Generator(device=x.device)
         gen.manual_seed(seed)
         noise = torch.randn(x.shape, device=x.device, dtype=x.dtype, generator=gen) * noise_scale
         
-        # 恢复随机状态（确保Dropout不受影响）
         torch.set_rng_state(cpu_rng_state)
         if cuda_rng_state is not None:
             torch.cuda.set_rng_state(cuda_rng_state)
@@ -95,30 +82,19 @@ class FeatureNoiseInjector(nn.Module):
 
 
 # =============================================================================
-# 模块级优化3Learnable Attention Pooling - 替代简单的last-token
 # =============================================================================
 
 class AttentionPooling(nn.Module):
     """
-    科学池化可学习的注意力池化（稳定版）
     
-    原理：
-    - 学习一个query向量，与所有token做attention
-    - 相比mean/last-token，可以自适应聚焦重要位置
     
-    稳定性优化：
-    - 小初始化query
-    - 残差缩放防止梯度爆炸
-    - 温度缩放attention
     """
     def __init__(self, hidden_dim: int, num_heads: int = 8, dropout: float = 0.1):
         super().__init__()
         self.hidden_dim = hidden_dim
         
-        # 可学习的query（小初始化）
         self.query = nn.Parameter(torch.randn(1, 1, hidden_dim) * 0.01)
         
-        # 多头注意力
         self.attention = nn.MultiheadAttention(
             embed_dim=hidden_dim,
             num_heads=num_heads,
@@ -129,14 +105,12 @@ class AttentionPooling(nn.Module):
         self.layer_norm = nn.LayerNorm(hidden_dim)
         self.dropout = nn.Dropout(dropout)
         
-        # 残差缩放因子（防止梯度爆炸）
         self.residual_scale = 0.5
         
     def forward(self, hidden_states: torch.Tensor, attention_mask: torch.Tensor = None) -> torch.Tensor:
         """
         Args:
             hidden_states: (B, seq_len, hidden_dim)
-            attention_mask: (B, seq_len) 1表示有效，0表示padding
         Returns:
             pooled: (B, hidden_dim)
         """
@@ -144,19 +118,14 @@ class AttentionPooling(nn.Module):
         device = hidden_states.device
         input_dtype = hidden_states.dtype
         
-        # 关键修复统一dtype，处理BFloat16
-        # 将输入转为float32进行attention计算，然后转回原dtype
         hidden_states_float = hidden_states.float()
         
-        # 扩展query到batch维度，并转为float32
         query = self.query.expand(batch_size, -1, -1).float()  # (B, 1, dim)
         
-        # 构建key_padding_mask（True表示忽略）
         key_padding_mask = None
         if attention_mask is not None:
             key_padding_mask = (attention_mask == 0)  # (B, seq_len)
         
-        # 注意力池化（在float32下计算）
         pooled, _ = self.attention(
             query=query,
             key=hidden_states_float,
@@ -164,38 +133,26 @@ class AttentionPooling(nn.Module):
             key_padding_mask=key_padding_mask,
         )  # (B, 1, dim)
         
-        # 稳定性残差缩放 + LayerNorm
         pooled = self.layer_norm(self.dropout(pooled) * self.residual_scale + query)
         
-        return pooled.squeeze(1)  # (B, dim) 返回float32，后续会统一处理
+        return pooled.squeeze(1)
 
 
 # =============================================================================
-# Label Graph Network - 学习标签间关系
 # =============================================================================
 
 class LabelGraphNetwork(nn.Module):
     """
-    科学多标签标签关系图网络（稳定版）
     
-    原理：
-    - SIDER的27个副作用标签之间存在医学相关性
-    - 用简化的交互机制建模标签间关系
     
-    稳定性优化：
-    - 移除复杂的双层attention（梯度爆炸源）
-    - 使用简单的标签-样本点积交互
-    - 添加残差缩放防止梯度爆炸
     """
     def __init__(self, num_labels: int, hidden_dim: int, dropout: float = 0.2):
         super().__init__()
         self.num_labels = num_labels
         self.hidden_dim = hidden_dim
         
-        # 标签embedding（小初始化）
         self.label_embedding = nn.Parameter(torch.randn(num_labels, hidden_dim) * 0.01)
         
-        # 标签投影（降维后交互，更稳定）
         self.label_proj = nn.Sequential(
             nn.LayerNorm(hidden_dim),
             nn.Linear(hidden_dim, hidden_dim // 4),
@@ -203,7 +160,6 @@ class LabelGraphNetwork(nn.Module):
             nn.Dropout(dropout),
         )
         
-        # 样本投影
         self.sample_proj = nn.Sequential(
             nn.LayerNorm(hidden_dim),
             nn.Linear(hidden_dim, hidden_dim // 4),
@@ -211,13 +167,10 @@ class LabelGraphNetwork(nn.Module):
             nn.Dropout(dropout),
         )
         
-        # 最终分类（从投影空间）
         self.classifier = nn.Linear(hidden_dim // 4, 1)
         
-        # 残差缩放（防止梯度爆炸）
         self.residual_scale = 0.1
         
-        # 初始化
         nn.init.xavier_uniform_(self.classifier.weight, gain=0.1)
         nn.init.zeros_(self.classifier.bias)
         
@@ -231,46 +184,33 @@ class LabelGraphNetwork(nn.Module):
         batch_size = sample_features.shape[0]
         sample_features = sample_features.float()
         
-        # 修复4L2归一化label embedding，防止长期训练发散
         label_emb_normalized = F.normalize(self.label_embedding, p=2, dim=-1)
         
-        # 1. 投影到低维空间
         sample_proj = self.sample_proj(sample_features)  # (B, dim//4)
         labels_proj = self.label_proj(label_emb_normalized)  # (L, dim//4)
         
-        # 归一化投影特征
         sample_proj = F.normalize(sample_proj, p=2, dim=-1)
         labels_proj = F.normalize(labels_proj, p=2, dim=-1)
         
-        # 2. 标签-样本交互（余弦相似度基础）
         sample_expanded = sample_proj.unsqueeze(1)  # (B, 1, dim//4)
         labels_expanded = labels_proj.unsqueeze(0)  # (1, L, dim//4)
         
-        # 交互特征
         interaction = sample_expanded + self.residual_scale * labels_expanded  # (B, L, dim//4)
         
-        # 3. 分类
         logits = self.classifier(interaction).squeeze(-1)  # (B, L)
         
-        # 修复2clamp输出防止极端值
         logits = logits.clamp(-10.0, 10.0)
         
         return logits
 
 
 # =============================================================================
-# 残差预测头
 # =============================================================================
 
 class ResidualPredictionHead(nn.Module):
     """
-    科学创新带残差连接的预测头
     
-    原理：
-    - Highway Network思想：让梯度有直接通路
-    - 对于深层MLP，残差连接显著改善梯度流
     
-    结构：
     input(2048) → [LayerNorm → Linear → GELU → Dropout] → h1(1024)
                                                            ↓
                    h1 + proj(input) → [LayerNorm → Linear → GELU → Dropout] → h2(512)
@@ -280,29 +220,22 @@ class ResidualPredictionHead(nn.Module):
     def __init__(self, input_dim: int, hidden_dim: int, output_dim: int, dropout: float = 0.15):
         super().__init__()
         
-        # 第一层：2048 → 1024
         self.ln1 = nn.LayerNorm(input_dim)
         self.fc1 = nn.Linear(input_dim, hidden_dim)
         self.drop1 = nn.Dropout(dropout)
         
-        # 残差投影1：2048 → 1024
         self.res_proj1 = nn.Linear(input_dim, hidden_dim, bias=False)
         
-        # 第二层：1024 → 512
         self.ln2 = nn.LayerNorm(hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, hidden_dim // 2)
         self.drop2 = nn.Dropout(dropout)
         
-        # 残差投影2：1024 → 512
         self.res_proj2 = nn.Linear(hidden_dim, hidden_dim // 2, bias=False)
         
-        # 输出层：512 → output_dim
         self.fc_out = nn.Linear(hidden_dim // 2, output_dim)
         
-        # 残差缩放因子
         self.res_scale = 0.3
         
-        # 初始化
         self._init_weights()
     
     def _init_weights(self):
@@ -313,20 +246,16 @@ class ResidualPredictionHead(nn.Module):
             nn.init.xavier_uniform_(m.weight, gain=0.1)
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # 第一层 + 残差
         h1 = self.drop1(F.gelu(self.fc1(self.ln1(x))))
-        h1 = h1 + self.res_scale * self.res_proj1(x)  # 残差连接
+        h1 = h1 + self.res_scale * self.res_proj1(x)
         
-        # 第二层 + 残差
         h2 = self.drop2(F.gelu(self.fc2(self.ln2(h1))))
-        h2 = h2 + self.res_scale * self.res_proj2(h1)  # 残差连接
+        h2 = h2 + self.res_scale * self.res_proj2(h1)
         
-        # 输出
         return self.fc_out(h2)
 
 
 # =============================================================================
-# 模态对比学习损失
 # =============================================================================
 
 class ModalContrastiveLoss(nn.Module):
@@ -478,26 +407,13 @@ class ModalContrastiveLoss(nn.Module):
 
 
 # =============================================================================
-# 互补性约束模块
 # =============================================================================
 
 class ModalityComplementarityLoss(nn.Module):
     """
-    稳定版模态互补性监控（不参与训练loss）
     
-    原理：
-    - Structure (GraphMVP) 擅长：局部原子环境、3D几何、化学键
-    - MolToken 擅长：序列模式、全局化学语义、构象柔性
     
-    设计：
-    - 计算原始特征的余弦相似度（直接在公共维度上）
-    - 返回相似度作为监控指标
-    - 不使用可学习投影（避免不稳定性）
     
-    输出解读：
-    - similarity ≈ 0：两模态正交，互补性极好
-    - similarity ≈ 0.3-0.5：两模态有适度互补
-    - similarity > 0.7：两模态高度相似，可能冗余
     """
     def __init__(self, struct_dim: int = 300, moltoken_dim: int = 768, 
                  common_dim: int = 128, margin: float = 0.3):
@@ -505,104 +421,74 @@ class ModalityComplementarityLoss(nn.Module):
         self.margin = margin
         self.common_dim = common_dim
         
-        # 固定的投影层（用于维度对齐，不参与训练）
         self.struct_proj = nn.Linear(struct_dim, common_dim, bias=False)
         self.moltoken_proj = nn.Linear(moltoken_dim, common_dim, bias=False)
         
-        # 初始化为正交投影（更稳定）
         nn.init.orthogonal_(self.struct_proj.weight)
         nn.init.orthogonal_(self.moltoken_proj.weight)
         
-        # 冻结参数：互补性只作为监控，不参与训练
         for p in self.parameters():
             p.requires_grad = False
     
     def forward(self, struct_feat: torch.Tensor, moltoken_feat: torch.Tensor) -> torch.Tensor:
         """
-        返回互补性相似度（用于监控，不参与梯度）
         
         Args:
             struct_feat: (B, struct_dim)
             moltoken_feat: (B, moltoken_dim)
         Returns:
-            similarity: 平均相似度（越低越互补）
         """
         if struct_feat is None or moltoken_feat is None:
             return torch.tensor(0.0)
         
         with torch.no_grad():
-            # 投影到共同空间
             struct_common = self.struct_proj(struct_feat.float())
             moltoken_common = self.moltoken_proj(moltoken_feat.float())
             
-            # L2归一化
             struct_norm = F.normalize(struct_common, p=2, dim=-1)
             moltoken_norm = F.normalize(moltoken_common, p=2, dim=-1)
             
-            # 逐样本余弦相似度
             similarity = (struct_norm * moltoken_norm).sum(dim=-1)  # (B,)
             
-            # 返回互补性指标（和epoch summary一致）
             # complementarity = 1 - |similarity|
-            # 范围 [0, 1]：越高表示互补性越好
             complementarity = 1.0 - similarity.abs()
             return complementarity.mean()
 
 
 # =============================================================================
-# R-Drop正则化（真正有效的一致性约束）
 # =============================================================================
 
 class RDropRegularizer(nn.Module):
     """
-    修复版R-Drop正则化 - 正确的KL散度实现
     
-    科学原理：
-    - 对同一个输入进行两次前向传播（dropout会产生不同结果）
-    - 计算两次输出的双向KL散度
-    - 鼓励模型对dropout不敏感，提高泛化能力
     
-    修复问题：
-    - 之前的实现值太小（0.0000）因为过度缩放
-    - 现在使用标准的双向KL散度，alpha直接控制权重
     
-    参考：R-Drop: Regularized Dropout for Neural Networks (NeurIPS 2021)
     """
     def __init__(self, alpha: float = 1.0):
         super().__init__()
-        self.alpha = alpha  # R-Drop权重，原论文推荐1.0
+        self.alpha = alpha
     
     def forward(self, logits1: torch.Tensor, logits2: torch.Tensor) -> torch.Tensor:
         """
-        计算R-Drop损失（稳定版KL散度）
         
-        稳定性修复：
-        - 概率clamp [0.02, 0.98]，避免极端概率
-        - 单样本KL散度clamp，防止个别样本梯度爆炸
         """
         if logits1 is None or logits2 is None:
             return torch.tensor(0.0, device=logits1.device if logits1 is not None else 'cpu')
         
-        # 转换为概率
         p1 = torch.sigmoid(logits1)
         p2 = torch.sigmoid(logits2)
         
-        # 稳定性clamp：[0.02, 0.98]
         eps = 0.02
         p1 = p1.clamp(eps, 1-eps)
         p2 = p2.clamp(eps, 1-eps)
         
-        # 双向KL散度（对于Bernoulli分布）
         kl_12 = p1 * (p1.log() - p2.log()) + (1-p1) * ((1-p1).log() - (1-p2).log())
         kl_21 = p2 * (p2.log() - p1.log()) + (1-p2) * ((1-p2).log() - (1-p1).log())
         
-        # 对称KL散度
         sym_kl = 0.5 * (kl_12 + kl_21)
         
-        # 稳定性单样本KL clamp
         sym_kl = sym_kl.clamp(0.0, 1.0)
         
-        # 平均并应用权重
         rdrop_loss = sym_kl.mean() * self.alpha
         
         return rdrop_loss
@@ -610,9 +496,7 @@ class RDropRegularizer(nn.Module):
 
 class FeatureConsistencyRegularizer(nn.Module):
     """
-    特征一致性正则化
     
-    在R-Drop的基础上，额外约束pooled特征的一致性
     """
     def __init__(self):
         super().__init__()
@@ -621,7 +505,6 @@ class FeatureConsistencyRegularizer(nn.Module):
         if feat1 is None or feat2 is None:
             return torch.tensor(0.0, device=feat1.device if feat1 is not None else 'cpu')
         
-        # 余弦相似度损失
         f1 = F.normalize(feat1, p=2, dim=-1)
         f2 = F.normalize(feat2, p=2, dim=-1)
         cos_sim = (f1 * f2).sum(dim=-1)
@@ -1008,15 +891,7 @@ class CMONModule(nn.Module):
     """
     CMON: Cross-Modal Orthogonal Decomposition Network.
 
-    独立于 SA-CMSA 的第二创新模块。将每个模态表示分解为共享分量(可由其他模态预测)
-    与私有分量(独有信息)，用可靠性门控做选择性跨模态注入，并生成 Digest Token
-    供 LLM 显式感知跨模态可靠性。
 
-    四阶段:
-      Stage 1 — 正交分解: p_i = p_shared_i + p_private_i, p_shared_i = Predictor_i(p_j, p_k)
-      Stage 2 — 可靠性估计: confidence_i = ConfidenceHead(...), reliability_i = uniqueness_i × confidence_i
-      Stage 3 — Token 增强: tokens_i += gate × enhance_proj(Σ reliability_j × p_private_j)
-      Stage 4 — Digest Token: digest_i = DigestGenerator(...) 插入 LLM 输入
     """
 
     def __init__(self, llm_dim: int, n_modalities: int = 3, sub_dim: int = 64,
@@ -1270,7 +1145,7 @@ class CMONModule(nn.Module):
 # =============================================================================
 
 class CrossAttentionBlock(nn.Module):
-    """稳定版Cross Attention Block with gradient stability"""
+    
     def __init__(self, d_model: int, num_heads: int, dropout: float = 0.1):
         super().__init__()
         self.norm1 = nn.LayerNorm(d_model)
@@ -1285,18 +1160,15 @@ class CrossAttentionBlock(nn.Module):
         )
         self.norm3 = nn.LayerNorm(d_model)
         
-        # 稳定性残差缩放因子，避免残差累加导致梯度爆炸
         self.residual_scale = 0.5
     
     def forward(self, queries: torch.Tensor, context: torch.Tensor) -> torch.Tensor:
         q = self.norm1(queries)
         k = v = self.norm2(context)
-        # 确保dtype一致
         if q.dtype != k.dtype:
             k = k.to(q.dtype)
             v = v.to(q.dtype)
         out, _ = self.cross_attn(q, k, v)
-        # 稳定性缩放残差，避免累加过大
         queries = queries + out * self.residual_scale
         queries = queries + self.ffn(self.norm3(queries)) * self.residual_scale
         return queries
@@ -1304,19 +1176,9 @@ class CrossAttentionBlock(nn.Module):
 
 class AdapterTokenGenerator(nn.Module):
     """
-    创新Q-Former style Adapter with Learnable Confidence
     
-    核心创新：
-    - 使用额外的 [CONF] query token 来学习模态置信度
-    - 内部维度保持 3072（能被 num_heads=8 整除）
-    - 置信度完全可学习，不依赖任何先验统计量
-    - 重要每个模态有独立的 modality_id 来区分置信度
     
-    科学依据：
-    - 置信度应该反映"模态特征对当前预测任务的有用程度"
-    - 这种有用程度应该由模型在训练中自动学习，而非人工设计
     """
-    # 类级别计数器，用于给每个实例分配唯一 ID
     _instance_count = 0
     
     def __init__(self, input_dim: int, output_dim: int, num_tokens: int = 32, 
@@ -1325,15 +1187,11 @@ class AdapterTokenGenerator(nn.Module):
         self.num_tokens = num_tokens
         self.output_dim = output_dim  # 3072
         
-        # 创新模态标识：每个 Adapter 实例有唯一 ID
-        # 这样不同模态的置信度预测能够区分
         self.modality_id = AdapterTokenGenerator._instance_count
         AdapterTokenGenerator._instance_count += 1
         
-        # 原有的 query tokens（用于生成模态表示）
         self.query_tokens = nn.Parameter(torch.randn(1, num_tokens, output_dim) * 0.02)
         
-        # 创新置信度 query token（额外1个token，用于学习置信度）
         self.conf_query = nn.Parameter(torch.randn(1, 1, output_dim) * 0.02)
         
         self.input_norm = nn.LayerNorm(input_dim)
@@ -1357,21 +1215,14 @@ class AdapterTokenGenerator(nn.Module):
         self.output_norm = nn.LayerNorm(output_dim)
         self.dropout = nn.Dropout(dropout)
         
-        # 创新模态特定的可学习 embedding
-        # 每个模态有独立的 embedding，注入到置信度计算中
-        # 这样不同模态即使特征相似，置信度也能分化
         self.modality_embedding = nn.Parameter(torch.randn(1, output_dim) * 0.02)
         
-        # 置信度预测头：从 conf_query + modality_embedding 预测置信度
-        # 简化设计：小网络 + 零初始化（初始输出 sigmoid(0)=0.5）
         self.confidence_head = nn.Sequential(
             nn.LayerNorm(output_dim),
             nn.Linear(output_dim, 64),
             nn.GELU(),
             nn.Linear(64, 1),
         )
-        # Xavier 初始化（gain=0.1），让不同样本有不同初始置信度
-        # 不能零初始化！零权重 → 所有输入映射到 0 → sigmoid(0)=0.5 → 永远不变
         nn.init.xavier_uniform_(self.confidence_head[3].weight, gain=0.1)
         nn.init.zeros_(self.confidence_head[3].bias)
 
@@ -1379,14 +1230,9 @@ class AdapterTokenGenerator(nn.Module):
                 return_global_token: bool = False):
         """
         Args:
-            features: (B, input_dim) 或 (B, seq_len, input_dim)
-            return_confidence: 是否返回置信度 (标量)
-            return_global_token: 是否额外返回 conf token
         Returns:
-            默认: tokens (B, num_tokens, output_dim)
             return_confidence: (tokens, confidence)  confidence is (B,)
             return_global_token: (tokens, global_token)  global_token is (B, D)
-            两者都: (tokens, confidence, global_token)
         """
         if features.dim() == 2:
             features = features.unsqueeze(1)
@@ -1398,21 +1244,17 @@ class AdapterTokenGenerator(nn.Module):
         features = self.input_proj(self.input_norm(features))
         batch = features.shape[0]
         
-        # 拼接 query_tokens 和 conf_query
         content_queries = self.query_tokens.expand(batch, -1, -1)
         conf_query = self.conf_query.expand(batch, -1, -1)
         queries = torch.cat([content_queries, conf_query], dim=1)  # (B, num_tokens+1, dim)
         
-        # 通过 Transformer 层处理
         for layer in self.layers:
             queries = layer['self_attn'](queries)
             queries = layer['cross_attn'](queries, features)
         
-        # 分离 content tokens 和 conf token
         content_tokens = queries[:, :self.num_tokens, :]  # (B, num_tokens, dim)
         conf_token = queries[:, self.num_tokens:, :]      # (B, 1, dim)
         
-        # 输出 tokens
         tokens = self.dropout(self.output_norm(content_tokens))
         
         # conf token plus the modality embedding
@@ -1433,30 +1275,15 @@ class AdapterTokenGenerator(nn.Module):
 
 
 # =============================================================================
-# Prompt 构建器（优先级文本提取）
 # =============================================================================
 
 class PromptComposer:
     """
-    多模态 Prompt 构建器
     
-    设计原则：
-    1. 任务无关的核心结构：适用于所有药物性质预测任务
-    2. 任务特定的描述注入：通过 TASK_DESCRIPTIONS 提供上下文
-    3. 简洁高效：减少 token 数量，聚焦预测
     
-    文本优先级：
-    1. KG 关系文本（最可信：来自知识图谱的结构化信息）
-    2. 药物描述文本（drug.json）
-    3. SMILES 衍生描述（化学结构信息）
-    4. 无文本（最低优先级）
     """
     
-    # ========= 多数据集任务描述（支持泛化）=========
-    # 格式：{数据集名: (任务描述, 任务类型, 标签数)}
-    # 任务类型：multi_label (多标签), binary (二分类), multi_class (多分类)
     TASK_CONFIGS = {
-        # MoleculeNet 数据集
         "SIDER": ("side effect prediction across organ systems", "multi_label", 27),
         "Tox21": ("toxicity prediction across biological assays", "multi_label", 12),
         "ToxCast": ("toxicity prediction across high-throughput assays", "multi_label", 617),
@@ -1466,21 +1293,17 @@ class PromptComposer:
         "HIV": ("HIV replication inhibition prediction", "binary", 1),
         "MUV": ("maximum unbiased validation prediction", "multi_label", 17),
         
-        # 其他常用数据集
         "PCBA": ("PubChem BioAssay prediction", "multi_label", 128),
-        "ChEMBL": ("bioactivity prediction", "multi_label", None),  # 动态标签数
+        "ChEMBL": ("bioactivity prediction", "multi_label", None),
         "DrugBank": ("drug-target interaction prediction", "multi_label", None),
         
-        # 默认配置
         "default": ("drug property prediction", "multi_label", None),
     }
     
-    # 向后兼容的简化描述
     TASK_DESCRIPTIONS = {
         k: v[0] for k, v in TASK_CONFIGS.items() if k != "default"
     }
     
-    # 化学官能团到文本的映射
     FUNCTIONAL_GROUP_DESCRIPTIONS = {
         "benzene": "aromatic ring",
         "hydroxyl": "alcohol group (-OH)",
@@ -1496,29 +1319,24 @@ class PromptComposer:
     
     def __init__(self, config: Dict):
         self.config = config
-        self.text_map = {}  # drug.json文本
-        self.kg_text_map = {}  # KG关系文本
+        self.text_map = {}
+        self.kg_text_map = {}
         self.dataset_name = config.get("dataset_name", "SIDER")
         
-        # 加载药物描述文本
         drug_text_path = config.get("drug_text_path")
         if drug_text_path and os.path.exists(drug_text_path):
             try:
                 with open(drug_text_path, 'r') as f:
                     raw = json.load(f)
-                # 修复：drug.json 的 key 是 DrugBank ID，需要用 value['SMILES'] 作为 key
                 for k, v in raw.items():
                     if isinstance(v, dict) and 'SMILES' in v:
-                        # 新格式：key=DrugBank ID, value={'SMILES':..., 'text':...}
                         smiles = v.get('SMILES', '')
                         if smiles:
-                            # 用 SMILES 作为 key，整个 value 作为值
                             canon = self._canonicalize_smiles(smiles)
                             if canon:
                                 self.text_map[canon] = v
                             self.text_map[smiles] = v
                     else:
-                        # 旧格式：key=SMILES, value=text
                         canon = self._canonicalize_smiles(k)
                         if canon:
                             self.text_map[canon] = v
@@ -1527,7 +1345,6 @@ class PromptComposer:
             except Exception as e:
                 logger.warning(f"[PromptComposer] Failed to load drug texts: {e}")
         
-        # 加载KG关系文本（如果提供）
         kg_text_path = config.get("kg_text_path")
         if kg_text_path and os.path.exists(kg_text_path):
             try:
@@ -1549,12 +1366,7 @@ class PromptComposer:
     
     def _extract_smiles_description(self, smiles: str) -> str:
         """
-        从SMILES提取丰富的药物化学描述
         
-        重点：MolToken不擅长的显式药物化学特征
-        - 药代动力学相关：LogP, TPSA, 氢键
-        - 药物相似性：QED, Lipinski规则
-        - 毒性预警：结构警报
         """
         if not RDKIT_AVAILABLE or not smiles:
             return ""
@@ -1566,12 +1378,10 @@ class PromptComposer:
             
             features = []
             
-            # ========= 基础结构 =========
             num_atoms = mol.GetNumAtoms()
             num_heavy = mol.GetNumHeavyAtoms()
             features.append(f"{num_heavy} heavy atoms")
             
-            # 环系统
             ring_info = mol.GetRingInfo()
             num_rings = ring_info.NumRings()
             num_aromatic = sum(1 for ring in ring_info.AtomRings() 
@@ -1579,17 +1389,13 @@ class PromptComposer:
             if num_rings > 0:
                 features.append(f"{num_rings} rings ({num_aromatic} aromatic)")
             
-            # ========= 药代动力学相关（MolToken弱） =========
-            # 分子量
             mw = Descriptors.MolWt(mol)
             features.append(f"MW={mw:.0f}")
             
-            # LogP（脂溶性，影响吸收）
             logp = Descriptors.MolLogP(mol)
             logp_desc = "lipophilic" if logp > 3 else ("hydrophilic" if logp < 1 else "moderate lipophilicity")
             features.append(f"LogP={logp:.1f} ({logp_desc})")
             
-            # TPSA（极性表面积，影响膜渗透）
             tpsa = Descriptors.TPSA(mol)
             if tpsa > 140:
                 features.append(f"TPSA={tpsa:.0f} (poor membrane permeability)")
@@ -1598,20 +1404,16 @@ class PromptComposer:
             else:
                 features.append(f"TPSA={tpsa:.0f}")
             
-            # 氢键供体/受体
             hbd = Descriptors.NumHDonors(mol)
             hba = Descriptors.NumHAcceptors(mol)
             features.append(f"HBD={hbd}, HBA={hba}")
             
-            # 可旋转键（影响口服生物利用度）
             rotatable = Descriptors.NumRotatableBonds(mol)
             if rotatable > 10:
                 features.append(f"{rotatable} rotatable bonds (high flexibility)")
             else:
                 features.append(f"{rotatable} rotatable bonds")
             
-            # ========= 药物相似性（MolToken无） =========
-            # Lipinski规则判断
             lipinski_violations = 0
             if mw > 500: lipinski_violations += 1
             if logp > 5: lipinski_violations += 1
@@ -1625,10 +1427,8 @@ class PromptComposer:
             else:
                 features.append(f"Lipinski: {lipinski_violations} violations (poor oral availability)")
             
-            # ========= 官能团（毒性/活性相关） =========
             functional_groups = []
             
-            # 检测关键官能团
             smarts_patterns = {
                 "nitro": "[N+](=O)[O-]",
                 "amine": "[NX3;H2,H1;!$(NC=O)]",
@@ -1657,10 +1457,8 @@ class PromptComposer:
             if functional_groups:
                 features.append(f"Functional groups: {', '.join(functional_groups[:5])}")
             
-            # ========= 毒性预警结构（MolToken无） =========
             toxicity_alerts = []
             
-            # 一些常见的毒性警报结构
             toxic_smarts = {
                 "reactive_aldehyde": "[CX3H1](=O)[#6]",
                 "michael_acceptor": "[CX3]=[CX3][CX3](=O)",
@@ -1679,7 +1477,6 @@ class PromptComposer:
             if toxicity_alerts:
                 features.append(f"Structural alerts: {', '.join(toxicity_alerts)}")
             
-            # 组合描述
             return "Molecular properties: " + "; ".join(features)
             
         except Exception as e:
@@ -1688,47 +1485,38 @@ class PromptComposer:
     def get_text_with_priority(self, smiles: str, drug_text: str = None,
                                kg_relations: List[str] = None) -> Tuple[str, str]:
         """
-        按优先级获取文本
         
-        返回：(文本内容, 来源标签)
-        来源标签：kg_relation, drug_text, smiles_derived, none
         """
-        MAX_TEXT_LEN = 800  # 文本长度限制（配合512 prompt）
-        MAX_KG_RELATIONS = 8  # KG关系数量
+        MAX_TEXT_LEN = 800
+        MAX_KG_RELATIONS = 8
         
-        # 优先级1：KG关系文本
         if kg_relations and len(kg_relations) > 0:
             kg_text = "; ".join(kg_relations[:MAX_KG_RELATIONS])
             return kg_text[:MAX_TEXT_LEN], "kg_relation"
         
-        # 检查KG文本缓存
         canon_smi = self._canonicalize_smiles(smiles)
         if canon_smi in self.kg_text_map:
             return str(self.kg_text_map[canon_smi])[:MAX_TEXT_LEN], "kg_relation"
         if smiles in self.kg_text_map:
             return str(self.kg_text_map[smiles])[:MAX_TEXT_LEN], "kg_relation"
         
-        # 优先级2：药物描述文本
         if drug_text:
             return str(drug_text)[:MAX_TEXT_LEN], "drug_text"
         
-        # 辅助函数：从 text_map 值中提取文本
         def _extract_text(v):
             if isinstance(v, dict):
-                return v.get('text', str(v))  # 新格式：{'SMILES':..., 'text':...}
-            return str(v)  # 旧格式：直接是文本
+                return v.get('text', str(v))
+            return str(v)
         
         if canon_smi in self.text_map:
             return _extract_text(self.text_map[canon_smi])[:MAX_TEXT_LEN], "drug_text"
         if smiles in self.text_map:
             return _extract_text(self.text_map[smiles])[:MAX_TEXT_LEN], "drug_text"
         
-        # 优先级3：SMILES衍生描述
         smiles_desc = self._extract_smiles_description(smiles)
         if smiles_desc:
             return smiles_desc[:MAX_TEXT_LEN], "smiles_derived"
         
-        # 优先级4：无文本
         return "", "none"
     
     @staticmethod
@@ -1813,7 +1601,6 @@ class PromptComposer:
     
     def get_prompt_example(self, dataset_name: str = None) -> str:
         """
-        获取指定数据集的prompt示例（用于调试和文档）
         """
         ds = dataset_name or self.dataset_name
         example_smiles = "CC(=O)Oc1ccccc1C(=O)O"  # Aspirin
@@ -1824,11 +1611,10 @@ class PromptComposer:
             drug_text=example_text,
             has_kg=True
         )
-        return f"示例Prompt ({ds}):\n{prompt}\n\n预估token数: ~{len(prompt.split())*1.3:.0f}"
+        return f"Example prompt ({ds}):\n{prompt}\n\nEstimated tokens: ~{len(prompt.split())*1.3:.0f}"
 
 
 # =============================================================================
-# 主模型
 # =============================================================================
 
 class DPModel(nn.Module):
@@ -1887,7 +1673,6 @@ class DPModel(nn.Module):
             net_cfg.setdefault("mars", {})["enabled"] = False
             logger.info("[Ablation] CMON disabled")
 
-        # ========= 编码器 =========
         self.structure_encoder = self._build_encoder(net_cfg["drug"]["structure"])
         struct_dim = self.structure_encoder.output_dim
         self.struct_dim = struct_dim
@@ -1895,7 +1680,6 @@ class DPModel(nn.Module):
         self.llm_dim = getattr(self.llm_encoder.model.config, "hidden_size", 2048)
         self.kg_dim = net_cfg["drug"]["kg"]["embedding_dim"]
         
-        # ========= MolToken编码器（第四模态）=========
         self.use_moltoken = net_cfg.get("use_moltoken", False)
         self.moltoken_encoder = None
         self.moltoken_adapter = None
@@ -1916,8 +1700,6 @@ class DPModel(nn.Module):
                     logger.warning(f"[DPModel] MolToken init failed: {e}")
                     self.use_moltoken = False
         
-        # ========= KG 补全实体索引映射（用于可视化解释）=========
-        # kge_bank 的第 i 行对应 kge_keys[i]（通常是 BMKG-DP 实体 id）
         self.kge_keys = kge_keys
         
         # CMSA
@@ -1956,14 +1738,6 @@ class DPModel(nn.Module):
                 ablation_flags=self.ablation_flags,
             )
 
-        # ========= Adapter Token配置 =========
-        # 总token预算：~400 = 64(struct) + 48(kg) + 56(moltoken) + ~230(prompt)
-        # 设计原则：
-        # 1. Structure是核心模态，给最多token (64)
-        # 2. MolToken提供互补语义信息 (56)
-        # 3. KG提供知识图谱信息 (48)
-        # 4. 剩余~230 token给Prompt文本
-        # 优化增加Adapter的dropout到0.25，减少过拟合
         adapter_dropout = net_cfg.get("adapter_dropout", 0.25)
         num_struct_tokens = net_cfg.get("num_struct_tokens", 64)   # 64 tokens
         num_kg_tokens = net_cfg.get("num_kg_tokens", 48)           # 48 tokens
@@ -1984,7 +1758,6 @@ class DPModel(nn.Module):
                 num_layers=4, dropout=adapter_dropout,
             )
         
-        # ========= 模态文本标记 =========
         self.modality_markers = {
             "struct_start": "<STRUCT_START>",
             "struct_end": "<STRUCT_END>",
@@ -2002,18 +1775,13 @@ class DPModel(nn.Module):
                 setattr(self, f"{marker_name}_residual",
                         nn.Parameter(torch.randn(1, 1, self.llm_dim) * 0.02))
 
-        # ========= Prompt 构建器 =========
         self.prompt_builder = PromptComposer({
             "drug_text_path": net_cfg.get("drug_text_path"),
             "kg_text_path": net_cfg.get("kg_text_path"),
             "dataset_name": net_cfg.get("dataset_name", "SIDER"),
         })
-        # Prompt文本的最大长度
-        # Token预算：~400总 - 174模态token = ~230 prompt token
-        # 但tokenizer可能会分词，所以给256以确保安全
         self.prompt_max_length = net_cfg.get("prompt_max_length", 256)
         
-        # 记录总token预算（用于调试）；CMON 开启时 +3 digest tokens
         num_markers = 9 if self.use_mars else 6
         total_modal_tokens = num_struct_tokens + num_kg_tokens + num_moltoken_tokens + num_markers
         logger.info(
@@ -2023,9 +1791,7 @@ class DPModel(nn.Module):
             f"total≈{total_modal_tokens + self.prompt_max_length}"
         )
 
-        # ========= 预测头（残差版）=========
         head_dropout = net_cfg.get("head_dropout", 0.30)
-        # 带残差连接的预测头: 2048 → 1024 → 512 → pred_dim
         hidden_dim = 1024
         
         self.head = ResidualPredictionHead(
@@ -2036,13 +1802,10 @@ class DPModel(nn.Module):
         )
         logger.info("[DPModel] Residual Prediction Head enabled")
         
-        # ========= 正则化模块 =========
-        # R-Drop 正则化
         self.rdrop_reg = RDropRegularizer(alpha=0.5)
         self.feat_consistency_reg = FeatureConsistencyRegularizer()
         self.use_rdrop = net_cfg.get("use_consistent_feature", True)
         
-        # MolToken-Structure互补性损失（使用可学习投影）
         if self.use_moltoken:
             self.complementarity_loss = ModalityComplementarityLoss(
                 struct_dim=struct_dim,
@@ -2051,19 +1814,16 @@ class DPModel(nn.Module):
                 margin=0.3,
             )
         
-        # 模态对比学习
         self.use_contrastive = net_cfg.get("use_contrastive", True)
         if self.use_contrastive:
             self.contrastive_loss = ModalContrastiveLoss(
                 hidden_dim=self.llm_dim,
                 proj_dim=256,
-                temperature=0.15,  # 防梯度尖峰从0.07提高到0.15
+                temperature=0.15,
             )
             logger.info("[DPModel] Modal Contrastive Learning enabled (temp=0.15)")
         
-        # ========= 模块级优化突破0.7的关键创新 =========
         
-        # 优化1特征噪声注入 - 提升泛化能力
         self.use_feature_noise = net_cfg.get("use_feature_noise", True)
         if self.use_feature_noise:
             noise_std = net_cfg.get("feature_noise_std", 0.05)
@@ -2072,7 +1832,6 @@ class DPModel(nn.Module):
             self.moltoken_noise = FeatureNoiseInjector(noise_std=noise_std * 0.5, adaptive=True)
             logger.info(f"[DPModel] Feature noise injection enabled: std={noise_std}")
         
-        # 优化2Attention Pooling - 替代简单的last-token
         self.use_attention_pooling = net_cfg.get("use_attention_pooling", True)
         if self.use_attention_pooling:
             self.attention_pooler = AttentionPooling(
@@ -2080,8 +1839,6 @@ class DPModel(nn.Module):
                 num_heads=8,
                 dropout=net_cfg.get("pooling_dropout", 0.15),
             )
-            # 可学习的 Attention vs Last-token 融合比例
-            # sigmoid(0.85) ≈ 0.70，与旧版初始值一致，但现在可以被模型自己调整
             self.attn_pool_ratio = nn.Parameter(torch.tensor(0.85))
             logger.info("[DPModel] Attention pooling enabled (learnable ratio, init≈0.70)")
         
@@ -2092,7 +1849,6 @@ class DPModel(nn.Module):
                 hidden_dim=self.llm_dim,
                 dropout=net_cfg.get("label_graph_dropout", 0.25),
             )
-            # 融合权重：head预测 vs label_graph预测
             self.label_graph_weight = nn.Parameter(torch.tensor(0.3))
             logger.info(f"[DPModel] Label Graph Network enabled: {pred_dim} labels")
 
@@ -2162,8 +1918,6 @@ class DPModel(nn.Module):
         )
         self.llm_encoder.model = get_peft_model(self.llm_encoder.model, lora_config)
         
-        # 显存优化启用梯度检查点（用计算换显存）
-        # 注意：DDP 多卡模式下禁用 checkpointing（有 inplace 操作兼容性问题）
         world_size = int(os.environ.get("WORLD_SIZE", 1))
         if world_size > 1:
             logger.info("[DPModel] Gradient checkpointing DISABLED (DDP multi-GPU mode)")
@@ -2208,14 +1962,9 @@ class DPModel(nn.Module):
 
     def _prepare_kg(self, drug_batch: Dict, batch_size: int, device: torch.device):
         """
-        准备 KG 特征 + 候选集（用于 KG 检索注意力）
         
         Returns:
             kg_feat:        (B, kg_dim) KG embedding
-            is_missing:     (B,) bool   缺失标记
-            kg_candidates:  (B, K, kg_dim) 候选 KG embedding (或 None)
-            candidate_mask: (B, K) bool  候选有效标记 (或 None)
-            candidate_sims: (B, K) float 候选相似度 (或 None)
         """
         kg_feat = drug_batch.get("kg")
         if kg_feat is None:
@@ -2229,7 +1978,6 @@ class DPModel(nn.Module):
         is_missing = (kg_feat.abs().sum(dim=-1) < 1e-6) | torch.isnan(kg_feat.sum(dim=-1))
         kg_feat = torch.nan_to_num(kg_feat, nan=0.0)
         
-        # 获取候选集（由 KGEFeaturizer 指纹预筛选生成）
         kg_candidates = drug_batch.get("kg_candidates", None)
         candidate_mask = drug_batch.get("kg_candidate_mask", None)
         candidate_sims = drug_batch.get("kg_candidate_sims", None)
@@ -2242,7 +1990,7 @@ class DPModel(nn.Module):
         return kg_feat, is_missing, kg_candidates, candidate_mask, candidate_sims
 
     def _encode_moltoken(self, drug_batch: Dict, smiles_list: List[str], device: torch.device):
-        """编码MolToken模态"""
+        
         if not self.use_moltoken or self.moltoken_encoder is None:
             return None
         
@@ -2265,36 +2013,30 @@ class DPModel(nn.Module):
             return None
 
     def _get_marker_embedding(self, marker_name: str, batch_size: int, device: torch.device) -> torch.Tensor:
-        """获取模态标记的嵌入（文本嵌入 + 可学习残差）"""
+        
         tokenizer = self.llm_encoder.tokenizer
         embed_layer = self.llm_encoder.model.get_input_embeddings()
         
-        # 获取文本标记
         marker_text = self.modality_markers.get(marker_name, "[UNK]")
         marker_ids = tokenizer(marker_text, return_tensors="pt", add_special_tokens=False).input_ids.to(device)
         
-        # 获取文本嵌入
         text_embed = embed_layer(marker_ids)  # (1, seq_len, dim)
-        # 平均池化成单个token
         text_embed = text_embed.mean(dim=1, keepdim=True)  # (1, 1, dim)
         
-        # 获取对应的可学习残差
         residual_name = marker_name + "_residual"
         if hasattr(self, residual_name):
             residual = getattr(self, residual_name)
             text_embed = text_embed + residual.to(text_embed.dtype)
         
-        # 扩展到batch
         return text_embed.expand(batch_size, -1, -1)
 
     def _get_decoder_layers(self):
-        """安全获取 LLM decoder layers, 兼容 PEFT 包装和原始模型."""
+        
         llm = self.llm_encoder.model
-        # 尝试多种层级路径 (PEFT 会多包一层 .model)
         candidates = [
             lambda: llm.model.model.layers,   # PEFT: PeftModel → CausalLM → Model → layers
-            lambda: llm.model.layers,          # 原始: CausalLM → Model → layers
-            lambda: llm.base_model.model.model.layers,  # PEFT v2 路径
+            lambda: llm.model.layers,
+            lambda: llm.base_model.model.model.layers,
         ]
         for fn in candidates:
             try:
@@ -2304,21 +2046,19 @@ class DPModel(nn.Module):
             except (AttributeError, TypeError):
                 continue
         raise AttributeError(
-            f"无法找到 decoder layers. llm type={type(llm).__name__}. "
-            f"请检查模型结构: {[n for n, _ in llm.named_children()]}"
+            f"Could not find decoder layers. llm type={type(llm).__name__}. "
+            f"Children: {[n for n, _ in llm.named_children()]}"
         )
 
     def _validate_tensor(self, tensor: torch.Tensor, name: str) -> torch.Tensor:
-        """验证并修复tensor的有效性"""
+        
         if tensor is None:
             return None
         
-        # 检查NaN和Inf
         if torch.isnan(tensor).any() or torch.isinf(tensor).any():
             logger.warning(f"[{name}] Found NaN/Inf, replacing with zeros")
             tensor = torch.nan_to_num(tensor, nan=0.0, posinf=0.0, neginf=0.0)
         
-        # 检查数值范围（防止极端值）
         max_val = tensor.abs().max()
         if max_val > 1e4:
             logger.warning(f"[{name}] Large values detected (max={max_val:.2f}), clipping")
@@ -2332,7 +2072,7 @@ class DPModel(nn.Module):
                       smiles_list: List[str],
                       confidences: Dict, device: torch.device,
                       ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """LLM 前向传播: 起止符标记 + tokens → LLM → logits"""
+        
         batch_size = struct_tokens.size(0)
         
         embed_layer = self.llm_encoder.model.get_input_embeddings()
@@ -2393,7 +2133,6 @@ class DPModel(nn.Module):
         if prefix.shape[-1] != self.llm_dim:
             raise ValueError(f"Prefix dimension mismatch: {prefix.shape[-1]} vs {self.llm_dim}")
         
-        # ========= 构建 Prompt =========
         batch_texts = drug_batch.get("text", None)
         if isinstance(batch_texts, list):
             batch_texts = [str(x) for x in batch_texts]
@@ -2481,7 +2220,6 @@ class DPModel(nn.Module):
             second_last_hidden = last_hidden[batch_idx, second_last_pos, :]
             pooled = (0.8 * last_token_hidden + 0.2 * second_last_hidden).float()
 
-        # ========= 预测头 =========
         head_logits = self.head(pooled)
         
         if self.use_label_graph:
@@ -2498,14 +2236,12 @@ class DPModel(nn.Module):
     def forward(self, drug_batch: Dict, mixup: Optional[Dict] = None, augment_smiles: bool = False):
         device = next(self.parameters()).device
         
-        # ========= 1. 原始特征编码 =========
         struct_feat, smiles_list = self._encode_structure(drug_batch, device)
         batch_size = struct_feat.size(0)
         kg_feat_raw, kg_mask, kg_candidates, candidate_mask, candidate_sims = \
             self._prepare_kg(drug_batch, batch_size, device)
         moltoken_feat = self._encode_moltoken(drug_batch, smiles_list, device)
         
-        # ========= 2. Mixup on raw features（可选）=========
         if mixup is not None:
             perm = mixup["perm"]
             lam = mixup.get("lam", 0.5)
@@ -2513,7 +2249,6 @@ class DPModel(nn.Module):
             if moltoken_feat is not None:
                 moltoken_feat = lam * moltoken_feat + (1 - lam) * moltoken_feat[perm]
         
-        # ========= 3. 特征噪声注入 =========
         if self.training and self.use_feature_noise:
             struct_feat = self.struct_noise(struct_feat)
             if moltoken_feat is not None:
@@ -2571,7 +2306,6 @@ class DPModel(nn.Module):
         kg_tokens = self.kg_adapter(kg_feat)
         kg_tokens = self._validate_tensor(kg_tokens, "kg_tokens")
 
-        # ========= 6. 互补性监控 & 对比学习 (在 dropout 之前) =========
         struct_repr = struct_tokens.mean(dim=1)
         kg_repr = kg_tokens.mean(dim=1)
         moltoken_repr = moltoken_tokens.mean(dim=1)
@@ -2628,7 +2362,6 @@ class DPModel(nn.Module):
             kg_tokens = kg_tokens * (~kg_drop).float()
             struct_tokens = struct_tokens * (~str_drop).float()
 
-        # ========= 8. LLM 前向传播 =========
         logits1, pooled1, text_sources = self._forward_once(
             drug_batch, struct_tokens, kg_tokens, moltoken_tokens,
             smiles_list, confidences, device,
@@ -2647,12 +2380,10 @@ class DPModel(nn.Module):
             rdrop_loss = self.rdrop_reg(logits1, logits2)
             feat_consistency_loss = self.feat_consistency_reg(pooled1, pooled2)
 
-        # 10. 互补性损失
         complementarity_loss = torch.tensor(0.0, device=device)
         if self.training and self.use_moltoken and moltoken_feat is not None:
             complementarity_loss = self.complementarity_loss(struct_feat, moltoken_feat)
 
-        # 11. 辅助损失
         aux_losses = {}
         if self.training:
             aux_losses["rdrop_loss"] = rdrop_loss.clamp(max=1.0)
@@ -2689,5 +2420,4 @@ class DPModel(nn.Module):
         }, None
 
 
-# 保持向后兼容
 DPModel.loss_weights = {"main": 1.0, "consistency": 0.1, "complementarity": 0.05}

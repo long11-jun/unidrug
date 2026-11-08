@@ -24,7 +24,6 @@ class MLP(nn.Module):
     
     def forward(self, h):
         output = self.model(h)
-        # 只有在批次大小>1时才squeeze，避免批次大小为1时的形状不匹配
         if output.shape[0] > 1:
             return output.squeeze()
         else:

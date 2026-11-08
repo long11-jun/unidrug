@@ -172,9 +172,7 @@ def cold_protein_split(dataset, nfolds):
 
 def cold_cluster_split(dataset, ngrids):
     """
-    Cold Cluster 划分：测试集的药物类型和蛋白类型都是新的
     
-    修改：确保每个 fold 的 test 集都有正负样本，否则跳过该 fold
     """
     import random
     
@@ -195,7 +193,6 @@ def cold_cluster_split(dataset, ngrids):
                 if i_drug in drug_clusters[i] and i_prot in prot_clusters[j]:
                     pair_in_grid[i][j].append(k)
     
-    # 获取标签
     labels = dataset.labels
     
     folds = []
@@ -204,7 +201,6 @@ def cold_cluster_split(dataset, ngrids):
         for j in range(ngrids):
             test_indices = pair_in_grid[i][j]
             
-            # 检查 test 集是否有正负样本
             if len(test_indices) == 0:
                 skipped += 1
                 logger.warning(f"[cold_cluster] Skipping fold ({i},{j}): empty test set")
@@ -215,33 +211,29 @@ def cold_cluster_split(dataset, ngrids):
             n_neg = len(test_labels) - n_pos
             
             if n_pos == 0 or n_neg == 0:
-                # 尝试从相邻格子补充样本
                 needed_label = 0 if n_pos > 0 else 1
-                补充_indices = []
+                extra_indices = []
                 
-                # 从同行或同列的其他格子中找样本
                 for k in range(ngrids):
                     if k != i:
                         for idx in pair_in_grid[k][j]:
                             if labels[idx] == needed_label:
-                                补充_indices.append(idx)
+                                extra_indices.append(idx)
                     if k != j:
                         for idx in pair_in_grid[i][k]:
                             if labels[idx] == needed_label:
-                                补充_indices.append(idx)
+                                extra_indices.append(idx)
                 
-                if len(补充_indices) >= 10:
-                    # 随机选取一些样本补充到 test 集
-                    random.shuffle(补充_indices)
-                    补充_count = min(50, len(补充_indices) // 2)  # 补充最多50个
-                    test_indices = test_indices + 补充_indices[:补充_count]
-                    logger.info(f"[cold_cluster] Fold ({i},{j}): 补充了 {补充_count} 个 label={needed_label} 样本")
+                if len(extra_indices) >= 10:
+                    random.shuffle(extra_indices)
+                    extra_count = min(50, len(extra_indices) // 2)
+                    test_indices = test_indices + extra_indices[:extra_count]
+                    logger.info(f"[cold_cluster] Fold ({i},{j}): added {extra_count} samples with label={needed_label}")
                 else:
                     skipped += 1
                     logger.warning(f"[cold_cluster] Skipping fold ({i},{j}): only has label={1 if n_pos > 0 else 0}, cannot fix")
                     continue
             
-            # 构建 train 集（排除同行同列）
             train = []
             for k in range(ngrids):
                 if k != i:
@@ -249,7 +241,6 @@ def cold_cluster_split(dataset, ngrids):
                         if l != j:
                             train += pair_in_grid[k][l]
             
-            # 从 train 中移除被补充到 test 的样本
             train = [idx for idx in train if idx not in test_indices]
             
             folds.append({"test": test_indices, "train": train})

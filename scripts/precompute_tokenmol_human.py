@@ -1,9 +1,10 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-预计算 Human DTI 数据集的 MolToken（单线程版本）
+Build the Human DTI TokenMol cache in one process.
 
-用法：
+Writes cache/tokenmol_3d/tokenmol_3d_human.pkl.
+
     python scripts/precompute_tokenmol_human.py
 """
 
@@ -14,7 +15,6 @@ import pandas as pd
 from pathlib import Path
 from tqdm import tqdm
 
-# 添加项目路径
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -25,7 +25,7 @@ from rdkit.Chem import rdMolTransforms
 
 
 def load_tokenmol_vocab(vocab_file: str):
-    """加载词表"""
+    
     vocab = {}
     with open(vocab_file, 'r') as f:
         for i, line in enumerate(f):
@@ -37,7 +37,7 @@ def load_tokenmol_vocab(vocab_file: str):
 
 
 def tokenmol_tokenize_smiles(smiles, vocab):
-    """贪心最长匹配"""
+    
     if not smiles or not vocab:
         return ["[UNK]"]
     max_len = 6
@@ -63,7 +63,7 @@ def tokenmol_tokenize_smiles(smiles, vocab):
 
 
 def extract_torsions(smiles, max_torsions=32):
-    """提取3D扭转角"""
+    
     try:
         mol = Chem.MolFromSmiles(smiles)
         if mol is None:
@@ -102,7 +102,7 @@ def extract_torsions(smiles, max_torsions=32):
 
 
 def build_tokenmol_seq(smiles, vocab):
-    """构建完整的TokenMol序列"""
+    
     tokens = tokenmol_tokenize_smiles(smiles, vocab)
     if not tokens:
         return None
@@ -122,11 +122,9 @@ def main():
     output_file = output_dir / "tokenmol_3d_human.pkl"
     failed_file = output_dir / "tokenmol_3d_human_failed.txt"
     
-    # 加载词表
     vocab = load_tokenmol_vocab(str(vocab_file))
     print(f"[INFO] Vocab size: {len(vocab)}")
     
-    # 加载所有SMILES
     smiles_list = []
     for csv_file in ["train.csv", "val.csv", "test.csv"]:
         csv_path = dataset_path / csv_file
@@ -138,7 +136,6 @@ def main():
     unique_smiles = list(set(smiles_list))
     print(f"[INFO] Total SMILES: {len(smiles_list)}, unique: {len(unique_smiles)}")
     
-    # 处理
     results = {}
     failed = []
     
@@ -152,7 +149,6 @@ def main():
         except Exception as e:
             failed.append((smi, str(e)))
     
-    # 保存
     output_dir.mkdir(parents=True, exist_ok=True)
     with open(output_file, 'wb') as f:
         pickle.dump(results, f)
