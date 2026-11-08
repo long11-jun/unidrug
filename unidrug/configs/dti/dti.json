@@ -1,0 +1,212 @@
+
+{
+    "model": "dti",
+    "_note": "DTI: BMKG, text from the dataset directory.",
+    "data": {
+        "drug": {
+            "modality": ["structure", "kg", "text", "smiles"],
+            "_note_modality": "smiles用于MolToken第四模态",
+            "featurizer": {
+                "structure": {
+                    "name": "graphmvp",
+                    "config_path": "configs/encoders/drug/graphmvp.json"
+                },
+                "kg": {
+                    "name": "KGE",
+                    "kg_name": "BMKG",
+                    "kg_path": "{asset_root}/assets/kg/BMKG/",
+                    "save_path": "{asset_root}/assets/kg/BMKG/",
+                    "kge_file": "embedding.pkl",
+                    "embed_dim": 256,
+                    "_note": "DTI用BMKG，不是BMKG-DP"
+                },
+                "text": {
+                    "name": "RawString",
+                    "max_length": 512,
+                    "fixed_length": 512,
+                    "transformer_type": "bert",
+                    "model_name_or_path": "microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract"
+                },
+                "smiles": {
+                    "name": "RawString",
+                    "max_length": 512,
+                    "fixed_length": 512,
+                    "transformer_type": "bert",
+                    "model_name_or_path": "microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract",
+                    "tokenmol_vocab_file": "../torsion_version/torsion_voc_property.csv",
+                    "tokenmol_precompute": true,
+                    "tokenmol_use_torsion": true,
+                    "tokenmol_max_torsions": 32
+                }
+            }
+        },
+        "protein": {
+            "modality": ["structure", "kg", "text"],
+            "featurizer": {
+                "structure": {
+                    "name": "index",
+                    "max_len": 1200
+                },
+                "kg": {
+                    "name": "KGE",
+                    "kg_name": "BMKG",
+                    "kg_path": "{asset_root}/assets/kg/BMKG/",
+                    "save_path": "{asset_root}/assets/kg/BMKG/kge",
+                    "embed_dim": 256,
+                    "_note": "与 embedding.pkl 预训练维度一致"
+                },
+                "text": {
+                    "name": "RawString",
+                    "max_length": 512,
+                    "_note": "文本直接传原始字符串，由LLM(Qwen) tokenizer处理，不需要BERT"
+                }
+            }
+        },
+        "concat_text_first": true
+    },
+    
+    "_note_network": "===== 网络配置 =====",
+    "network": {
+        "_comment_drug": "===== 药物编码器（4模态：结构用GraphMVP，KG用BMKG）=====",
+        "drug": {
+            "structure": {
+                "name": "graphmvp",
+                "config_path": "configs/encoders/drug/graphmvp.json"
+            },
+            "kg": {
+                "embedding_dim": 256
+            }
+        },
+        
+        "_comment_moltoken": "===== MolToken第四模态（与DP一致）=====",
+        "use_moltoken": true,
+        "moltoken": {
+            "model_name": "{asset_root}/ckpts/pretrained",
+            "vocab_file": "../torsion_version/torsion_voc_property.csv",
+            "device": "cuda:0",
+            "max_length": 200,
+            "torch_dtype": "float16"
+        },
+        
+        "_comment_prot3d": "===== 蛋白质3D模态（默认理化性质编码器，联网后可切换FoldSeek）=====",
+        "use_foldseek": true,
+        "prot_3d_mode": "property",
+        "_note_prot3d": "property=理化性质编码器(9D,无需联网) | foldseek=FoldSeek3Di(需要真实3D缓存)",
+        "foldseek": {
+            "embedding_dim": 128,
+            "hidden_dim": 128,
+            "output_dim": 256,
+            "max_length": 1500,
+            "dropout": 0.1,
+            "_note": "20字母3Di alphabet + 多尺度CNN, 与DeepMCNN对称"
+        },
+        
+        "_comment_text": "===== 文本信息（从数据集目录获取，仅作Prompt）=====",
+        "use_dataset_text": true,
+        "_note_text": "DTI的文本从数据集目录下的drug.json和protein.json获取，仅用于Prompt",
+        
+        "_comment_protein": "===== 蛋白质编码器（4模态：Structure + KG + FoldSeek 3Di + Text）=====",
+        "protein": {
+            "structure": {
+                "name": "enhanced_mcnn",
+                "vocab_size": 26,
+                "embedding_num": 256,
+                "hidden_size": 256,
+                "output_size": 256,
+                "kernel_sizes": [3, 5, 7, 9, 11, 15],
+                "dropout": 0.1,
+                "_note": "v5.2: 维度128->256对齐药物，增加kernel=15捕捉长距离模式"
+            },
+            "kg": {
+                "embedding_dim": 256
+            }
+        },
+        
+        "_comment_adapter": "Six adapter token generators.",
+        "adapter_dropout": 0.25,
+        "adapter_layers": 4,
+        "adapter": {
+            "_layout": "Drug: struct 40 + KG 28 + MolToken 32 = 100 | Protein: struct 40 + KG 28 + FoldSeek 32 = 100 | Total: 200 tokens + 6 global",
+            "drug_struct_tokens": 40,
+            "drug_kg_tokens": 28,
+            "drug_mol_tokens": 32,
+            "prot_struct_tokens": 40,
+            "prot_kg_tokens": 28,
+            "prot_3d_tokens": 32
+        },
+        
+        "_comment_kg_path": "===== BMKG 知识图谱路径（KGE嵌入）=====",
+        "kg_path": "{asset_root}/assets/kg/BMKG",
+        "_note_kg": "DTI用BMKG/embedding.pkl作为KGE嵌入源",
+        
+        "_comment_llm": "===== LLM 配置（与DP完全一致）=====",
+        "llm": {
+            "name": "qwen",
+            "model_name": "{asset_root}/qwen2.5-3b-instruct",
+            "max_length": 512,
+            "output_dim": 256,
+            "torch_dtype": "bfloat16",
+            "device": "cuda:0",
+            "_note": "与DP使用相同的Qwen2.5-3B模型"
+        },
+        
+        "head_dropout": 0.15,
+        
+        "_comment_stability": "===== 训练稳定性配置 v5.0（恢复高性能+防崩塌）=====",
+        "stability": {
+            "feature_clamp_norm": 10.0,
+            "output_clamp_norm": 6.0,
+            "logits_clamp_abs": 4.0,
+            "marker_residual_scale": 0.3,
+            "conf_injection_strength": 0.2,
+            "residual_scale": 0.3,
+            "_note": "v5.0: 恢复v3.1稳定配置"
+        },
+        
+        "_comment_feature_noise": "===== 特征噪声增强（v5.3: 防止过拟合崩塌）=====",
+        "use_feature_noise": true,
+        "feature_noise_std": 0.02,
+        "_note_noise": "v5.3: 开启噪声增强，提升稳定性与泛化",
+        
+        "_comment_pooling": "===== LLM输出池化（恢复v3.1）=====",
+        "use_attention_pooling": true,
+        "pooling_dropout": 0.12,
+        "use_modal_query": true,
+        "_note_pooling": "v5.0: 恢复v3.1配置",
+        
+        "_comment_pred": "===== 预测头 =====",
+        "pred_head": {
+            "dropout": 0.10
+        },
+        
+        "_comment_lora": "===== LoRA 配置（恢复v3.1高表达能力）=====",
+        "use_lora": true,
+        "lora_rank": 48,
+        "lora_alpha": 96,
+        "lora_dropout": 0.08,
+        "_note_lora": "v5.0: 恢复v3.1的rank=48，这是达到0.9333的配置",
+        
+        "_comment_freeze": "===== 冻结/解冻策略（与DP完全一致）=====",
+        "freeze_llm_base": true,
+        "unfreeze_graphmvp_layers": 2,
+        "unfreeze_mcnn_layers": ["output_proj", "attention"],
+        "_note_freeze": "MCNN只解冻output_proj和attention",
+        
+        "_comment_markers": "===== 模态标记格式（12标记：Drug×6 + Protein×6）=====",
+        "modality_markers": {
+            "d_struct_start": "[D_STRUCT_START]",
+            "d_struct_end": "[D_STRUCT_END]",
+            "d_kg_start": "[D_KG_START]",
+            "d_kg_end": "[D_KG_END]",
+            "d_mol_start": "[D_MOL_START]",
+            "d_mol_end": "[D_MOL_END]",
+            "p_struct_start": "[P_STRUCT_START]",
+            "p_struct_end": "[P_STRUCT_END]",
+            "p_kg_start": "[P_KG_START]",
+            "p_kg_end": "[P_KG_END]",
+            "p_3d_start": "[P_3D_START]",
+            "p_3d_end": "[P_3D_END]",
+            "_note": "Separate start and end markers for each drug and protein modality."
+        }
+    }
+}

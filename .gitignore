@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+ckpts/
+*.pt
+*.pth
+.DS_Store
+KEDD_temporal/

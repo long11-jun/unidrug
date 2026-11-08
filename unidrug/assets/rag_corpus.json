@@ -1,0 +1,442 @@
+[
+    {
+        "text": "Nitro-aromatic scaffolds often correlate with hepatotoxicity via reactive metabolites. The nitro group undergoes nitroreduction to form reactive nitroso and hydroxylamine intermediates.",
+        "tags": [
+            "nitro",
+            "aromatic",
+            "hepatotoxicity",
+            "liver"
+        ],
+        "datasets": [
+            "SIDER",
+            "general"
+        ]
+    },
+    {
+        "text": "Drugs with high lipophilicity (LogP > 4) and molecular weight > 400 Da show increased risk of drug-induced liver injury (DILI). Monitor ALT/AST levels.",
+        "tags": [
+            "high_logp",
+            "high_mw",
+            "hepatotoxicity",
+            "dili",
+            "liver"
+        ],
+        "datasets": [
+            "SIDER",
+            "general"
+        ]
+    },
+    {
+        "text": "Acetaminophen-like structures with para-aminophenol can cause hepatotoxicity through NAPQI (N-acetyl-p-benzoquinone imine) formation when glutathione is depleted.",
+        "tags": [
+            "aminophenol",
+            "hepatotoxicity",
+            "napqi"
+        ],
+        "datasets": [
+            "SIDER",
+            "Tox21",
+            "general"
+        ]
+    },
+    {
+        "text": "hERG channel blockers with basic nitrogen and aromatic rings may cause QT prolongation and cardiac arrhythmias. Common in antihistamines, antipsychotics, and antibiotics.",
+        "tags": [
+            "herg",
+            "cardiac",
+            "arrhythmia",
+            "qt_prolongation",
+            "basic_amine"
+        ],
+        "datasets": [
+            "SIDER",
+            "general"
+        ]
+    },
+    {
+        "text": "Fluoroquinolone antibiotics are associated with aortic aneurysm and dissection risk. The mechanism involves collagen degradation via MMP activation.",
+        "tags": [
+            "fluoroquinolone",
+            "cardiac",
+            "aortic",
+            "collagen"
+        ],
+        "datasets": [
+            "SIDER",
+            "general"
+        ]
+    },
+    {
+        "text": "Lipophilic molecules with TPSA < 50 \u00c5\u00b2 frequently cross the BBB and may trigger CNS side effects including sedation, dizziness, and seizures.",
+        "tags": [
+            "high_logp",
+            "low_tpsa",
+            "cns",
+            "bbb",
+            "sedation",
+            "seizure"
+        ],
+        "datasets": [
+            "SIDER",
+            "BBBP",
+            "general"
+        ]
+    },
+    {
+        "text": "Anticholinergic drugs can cause cognitive impairment, confusion, and delirium, especially in elderly. Common structural features include tertiary amines and aromatic rings.",
+        "tags": [
+            "anticholinergic",
+            "cns",
+            "cognitive",
+            "delirium",
+            "tertiary_amine"
+        ],
+        "datasets": [
+            "SIDER",
+            "general"
+        ]
+    },
+    {
+        "text": "Serotonin syndrome risk increases with drugs containing tryptamine scaffolds or MAO inhibitors. Symptoms include hyperthermia, agitation, and tremor.",
+        "tags": [
+            "serotonin",
+            "cns",
+            "tryptamine",
+            "mao",
+            "hyperthermia"
+        ],
+        "datasets": [
+            "SIDER",
+            "general"
+        ]
+    },
+    {
+        "text": "Sulfonamide motifs can induce hypersensitivity reactions including Stevens-Johnson syndrome. Cross-reactivity may occur between sulfonamide antibiotics and non-antibiotic sulfonamides.",
+        "tags": [
+            "sulfonamide",
+            "immune",
+            "hypersensitivity",
+            "sjs",
+            "allergy"
+        ],
+        "datasets": [
+            "SIDER",
+            "general"
+        ]
+    },
+    {
+        "text": "Beta-lactam antibiotics (penicillins, cephalosporins) are common causes of drug allergy. The beta-lactam ring can act as a hapten after binding to proteins.",
+        "tags": [
+            "beta_lactam",
+            "immune",
+            "allergy",
+            "penicillin",
+            "hapten"
+        ],
+        "datasets": [
+            "SIDER",
+            "general"
+        ]
+    },
+    {
+        "text": "Drugs with aromatic amine groups can be metabolized to reactive nitroso compounds, leading to idiosyncratic drug reactions and autoimmune-like symptoms.",
+        "tags": [
+            "aromatic_amine",
+            "immune",
+            "idiosyncratic",
+            "autoimmune"
+        ],
+        "datasets": [
+            "SIDER",
+            "Tox21",
+            "general"
+        ]
+    },
+    {
+        "text": "Aminoglycoside antibiotics accumulate in renal proximal tubules, causing nephrotoxicity. Risk factors include prolonged use, dehydration, and concurrent nephrotoxic drugs.",
+        "tags": [
+            "aminoglycoside",
+            "nephrotoxicity",
+            "kidney",
+            "tubular"
+        ],
+        "datasets": [
+            "SIDER",
+            "general"
+        ]
+    },
+    {
+        "text": "NSAIDs can cause acute kidney injury by inhibiting prostaglandin synthesis, leading to reduced renal blood flow. Risk is higher in patients with pre-existing renal impairment.",
+        "tags": [
+            "nsaid",
+            "nephrotoxicity",
+            "kidney",
+            "prostaglandin",
+            "carboxylic"
+        ],
+        "datasets": [
+            "SIDER",
+            "general"
+        ]
+    },
+    {
+        "text": "NSAIDs cause GI ulceration by inhibiting COX-1-mediated prostaglandin synthesis. Risk is dose-dependent and increased with concurrent corticosteroid use.",
+        "tags": [
+            "nsaid",
+            "gi",
+            "ulcer",
+            "cox",
+            "carboxylic"
+        ],
+        "datasets": [
+            "SIDER",
+            "general"
+        ]
+    },
+    {
+        "text": "Antibiotics can disrupt gut microbiome, leading to Clostridium difficile infection and diarrhea. Broad-spectrum antibiotics carry higher risk.",
+        "tags": [
+            "antibiotic",
+            "gi",
+            "diarrhea",
+            "microbiome",
+            "c_diff"
+        ],
+        "datasets": [
+            "SIDER",
+            "general"
+        ]
+    },
+    {
+        "text": "Drugs with quinone or hydroquinone structures can cause methemoglobinemia by oxidizing hemoglobin. Symptoms include cyanosis and dyspnea.",
+        "tags": [
+            "quinone",
+            "hematologic",
+            "methemoglobinemia",
+            "hemoglobin"
+        ],
+        "datasets": [
+            "SIDER",
+            "Tox21",
+            "general"
+        ]
+    },
+    {
+        "text": "Chloramphenicol and other drugs with nitrobenzene groups can cause aplastic anemia through bone marrow suppression. This is an idiosyncratic reaction.",
+        "tags": [
+            "nitrobenzene",
+            "hematologic",
+            "aplastic_anemia",
+            "bone_marrow"
+        ],
+        "datasets": [
+            "SIDER",
+            "general"
+        ]
+    },
+    {
+        "text": "Photosensitizing drugs (fluoroquinolones, tetracyclines, NSAIDs) can cause phototoxic reactions. Advise patients to avoid sun exposure during treatment.",
+        "tags": [
+            "photosensitivity",
+            "dermatologic",
+            "fluoroquinolone",
+            "tetracycline",
+            "skin"
+        ],
+        "datasets": [
+            "SIDER",
+            "general"
+        ]
+    },
+    {
+        "text": "Drugs causing Stevens-Johnson syndrome (SJS) often contain aromatic amines or sulfonamides. HLA-B*5801 is a genetic risk factor for allopurinol-induced SJS.",
+        "tags": [
+            "sjs",
+            "dermatologic",
+            "aromatic_amine",
+            "sulfonamide",
+            "skin",
+            "hla"
+        ],
+        "datasets": [
+            "SIDER",
+            "general"
+        ]
+    },
+    {
+        "text": "Atypical antipsychotics can cause metabolic syndrome including weight gain, hyperglycemia, and dyslipidemia. Mechanism involves 5-HT2C and H1 receptor antagonism.",
+        "tags": [
+            "antipsychotic",
+            "metabolic",
+            "diabetes",
+            "weight_gain",
+            "dyslipidemia"
+        ],
+        "datasets": [
+            "SIDER",
+            "general"
+        ]
+    },
+    {
+        "text": "Thiazide diuretics can cause hypokalemia, hyponatremia, and hyperuricemia. Monitor electrolytes and uric acid levels during therapy.",
+        "tags": [
+            "thiazide",
+            "metabolic",
+            "electrolyte",
+            "hypokalemia"
+        ],
+        "datasets": [
+            "SIDER",
+            "general"
+        ]
+    },
+    {
+        "text": "Lipinski's Rule of Five: MW \u2264 500, LogP \u2264 5, HBD \u2264 5, HBA \u2264 10. Violations correlate with poor oral bioavailability and increased toxicity risk.",
+        "tags": [
+            "lipinski",
+            "admet",
+            "bioavailability",
+            "high_mw",
+            "high_logp"
+        ],
+        "datasets": [
+            "general"
+        ]
+    },
+    {
+        "text": "Veber's rules: Rotatable bonds \u2264 10 and TPSA \u2264 140 \u00c5\u00b2 for good oral bioavailability. High flexibility reduces membrane permeability.",
+        "tags": [
+            "veber",
+            "admet",
+            "bioavailability",
+            "flexibility",
+            "tpsa"
+        ],
+        "datasets": [
+            "general"
+        ]
+    },
+    {
+        "text": "Reactive metabolites from CYP450 metabolism can form protein adducts, leading to idiosyncratic toxicity. Common bioactivation pathways include epoxidation, quinone formation, and N-oxidation.",
+        "tags": [
+            "cyp450",
+            "metabolism",
+            "reactive_metabolite",
+            "bioactivation",
+            "epoxide"
+        ],
+        "datasets": [
+            "general",
+            "Tox21"
+        ]
+    },
+    {
+        "text": "Michael acceptors (\u03b1,\u03b2-unsaturated carbonyls) are electrophilic and can form covalent bonds with proteins, leading to toxicity. Common in acrylamide-containing drugs.",
+        "tags": [
+            "michael_acceptor",
+            "electrophile",
+            "covalent",
+            "reactive"
+        ],
+        "datasets": [
+            "Tox21",
+            "general"
+        ]
+    },
+    {
+        "text": "Epoxides are highly reactive electrophiles that can alkylate DNA and proteins. They are often formed as metabolites of aromatic compounds.",
+        "tags": [
+            "epoxide",
+            "electrophile",
+            "dna_damage",
+            "genotoxicity",
+            "aromatic"
+        ],
+        "datasets": [
+            "Tox21",
+            "general"
+        ]
+    },
+    {
+        "text": "Aldehydes can form Schiff bases with lysine residues, leading to protein modification. Aldehyde-containing drugs may cause tissue irritation and toxicity.",
+        "tags": [
+            "aldehyde",
+            "electrophile",
+            "schiff_base",
+            "reactive"
+        ],
+        "datasets": [
+            "Tox21",
+            "general"
+        ]
+    },
+    {
+        "text": "Polycyclic aromatic hydrocarbons (PAHs) can be metabolized to diol-epoxides, which are potent mutagens and carcinogens.",
+        "tags": [
+            "polycyclic",
+            "aromatic",
+            "carcinogen",
+            "mutagen",
+            "diol_epoxide"
+        ],
+        "datasets": [
+            "Tox21",
+            "general"
+        ]
+    },
+    {
+        "text": "Drug-drug interactions often occur at CYP3A4, CYP2D6, and CYP2C9 enzymes. Inhibitors can increase plasma levels of co-administered drugs, enhancing toxicity.",
+        "tags": [
+            "ddi",
+            "cyp3a4",
+            "cyp2d6",
+            "interaction",
+            "inhibitor"
+        ],
+        "datasets": [
+            "general"
+        ]
+    },
+    {
+        "text": "P-glycoprotein (P-gp) substrates may have reduced CNS penetration but increased GI toxicity. P-gp inhibitors can alter drug distribution and efficacy.",
+        "tags": [
+            "pgp",
+            "transporter",
+            "efflux",
+            "cns",
+            "gi"
+        ],
+        "datasets": [
+            "BBBP",
+            "general"
+        ]
+    },
+    {
+        "text": "Kinase inhibitors often cause skin rash and diarrhea due to EGFR inhibition in epithelial tissues. Hepatotoxicity may occur with multi-kinase inhibitors.",
+        "tags": [
+            "kinase",
+            "egfr",
+            "skin",
+            "diarrhea",
+            "hepatotoxicity"
+        ],
+        "datasets": [
+            "SIDER",
+            "general"
+        ]
+    },
+    {
+        "text": "HDAC inhibitors can cause thrombocytopenia and fatigue. Cardiac effects including QT prolongation have been reported.",
+        "tags": [
+            "hdac",
+            "thrombocytopenia",
+            "fatigue",
+            "cardiac",
+            "qt_prolongation"
+        ],
+        "datasets": [
+            "SIDER",
+            "general"
+        ]
+    }
+]

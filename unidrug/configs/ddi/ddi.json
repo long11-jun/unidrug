@@ -1,0 +1,167 @@
+{
+  "model": "ddi",
+  "_comment": "DDIModel - 完整复用 DP/DTI 药物支路架构（SA-CMSA + CMON）",
+  "_version": "2.0",
+  "_architecture": "DDI = DTI药物支路 × 2 (与 PPI = DTI蛋白质支路 × 2 对称)",
+
+  "_note_data": "===== 数据配置（药物三模态：Structure + KG + MolToken）=====",
+  "data": {
+    "drug": {
+      "modality": ["structure", "kg", "text", "smiles"],
+      "_note_modality": "smiles 用于 MolToken 第三模态（torsion angle）",
+      "featurizer": {
+        "structure": {
+          "name": "graphmvp",
+          "config_path": "configs/encoders/drug/graphmvp.json"
+        },
+        "kg": {
+          "name": "KGE",
+          "kg_name": "BMKG",
+          "kg_path": "{asset_root}/assets/kg/BMKG/",
+          "save_path": "{asset_root}/assets/kg/BMKG/",
+          "kge_file": "embedding.pkl",
+          "embed_dim": 256,
+          "_note": "DDI 用 BMKG（与 DTI 一致），不是 BMKG-DP"
+        },
+        "text": {
+          "name": "RawString",
+          "max_length": 512,
+          "fixed_length": 512,
+          "transformer_type": "bert",
+          "model_name_or_path": "microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract"
+        },
+        "smiles": {
+          "name": "RawString",
+          "max_length": 512,
+          "fixed_length": 512,
+          "transformer_type": "bert",
+          "model_name_or_path": "microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract",
+          "tokenmol_vocab_file": "../torsion_version/torsion_voc_property.csv",
+          "tokenmol_precompute": true,
+          "tokenmol_use_torsion": true,
+          "tokenmol_max_torsions": 32
+        }
+      }
+    }
+  },
+
+  "_note_network": "===== 网络配置（与 DTI 药物侧对齐）=====",
+  "network": {
+    "drug": {
+      "structure": {
+        "name": "graphmvp",
+        "config_path": "configs/encoders/drug/graphmvp.json"
+      },
+      "kg": {
+        "embedding_dim": 256
+      }
+    },
+
+    "_comment_llm": "=== LLM 配置（与 DTI/PPI/DP 一致）===",
+    "llm": {
+      "name": "qwen",
+      "model_name": "{asset_root}/qwen2.5-3b-instruct",
+      "max_length": 512,
+      "device": "cuda:0",
+      "torch_dtype": "bfloat16"
+    },
+
+    "_comment_kg": "=== KG 配置（与 DTI 一致）===",
+    "kg_path": "{asset_root}/assets/kg/BMKG",
+
+    "_comment_moltoken": "=== MolToken 第三模态（与 DTI 药物侧一致）===",
+    "use_moltoken": true,
+    "moltoken": {
+      "model_name": "{asset_root}/ckpts/pretrained",
+      "vocab_file": "../torsion_version/torsion_voc_property.csv",
+      "device": "cuda:0",
+      "max_length": 200,
+      "torch_dtype": "float16"
+    },
+
+    "_comment_adapters": "=== Adapter 配置（与 DTI 药物侧一致）===",
+    "adapter_dropout": 0.25,
+    "num_struct_tokens": 40,
+    "num_kg_tokens": 28,
+    "num_moltoken_tokens": 32,
+    "_note_tokens": "每个药物：Structure 40 + KG 28 + MolToken 32 = 100 tokens",
+
+    "_comment_lora": "=== LoRA 配置（与 DTI/PPI 一致）===",
+    "use_lora": true,
+    "lora_rank": 32,
+    "lora_alpha": 64,
+    "lora_dropout": 0.05,
+    "head_dropout": 0.15,
+
+    "_comment_noise": "=== Feature Noise（与 DTI 一致）===",
+    "use_feature_noise": true,
+    "feature_noise_std": 0.02,
+
+    "_comment_pooling": "=== Pooling 配置（与 DTI/PPI 一致）===",
+    "use_attention_pooling": true,
+    "pooling_dropout": 0.12,
+
+    "_comment_stability": "=== 训练稳定性配置（与 DTI 一致）===",
+    "stability": {
+      "logits_clamp_abs": 10.0,
+      "_note": "logits 裁剪范围"
+    },
+
+    "_comment_prompt": "=== Prompt 配置 ===",
+    "drug_text_path": "{asset_root}/assets/kg/BMKG/drug.json",
+    "prompt_max_length": 256,
+    "_note_prompt": "文本优先从 kg_path/drug.json 提取，缺失时从 SMILES 生成",
+
+    "_comment_ddi_specific": "=== DDI 特有配置 ===",
+    "num_classes": 4,
+    "_note_classes": "DDI 默认 4 分类任务（类型 0, 1, 2, 3），LUO 场景为 2 分类",
+
+    "_comment_cmsa": "SA-CMSA",
+    "cmsa": {
+      "enabled": true,
+      "sub_dim": 128,
+      "topk": 16,
+      "num_heads": 2,
+      "dropout": 0.1,
+      "align_lambda": 0.05,
+      "retrieve_lambda": 0.1,
+      "enable_mol_completion": false,
+      "_note": "Drug A 和 Drug B 共享同一个 SparseAttentionCMSA 实例"
+    },
+
+    "_comment_cmon": "CMON",
+    "mars": {
+      "enabled": true,
+      "sub_dim": 64,
+      "_note": "Drug A 和 Drug B 共享同一个 CMONModule(3模态), 输出 Digest Tokens 注入 LLM 序列"
+    },
+
+    "_comment_ablation": "=== 消融实验指南 ===",
+    "_ablation_options": {
+      "no_cmsa": "关闭 SA-CMSA（KG 补全模块）",
+      "no_cmon": "关闭 CMON（正交分解模块）",
+      "no_cmsa,no_cmon": "同时关闭 SA-CMSA 和 CMON",
+      "no_moltoken": "关闭 MolToken（退化为二模态）",
+      "_usage": "在 shell 脚本中通过 ABLATION 参数传入，逗号分隔"
+    },
+
+    "_comment_scenarios": "=== DDI 场景配置 ===",
+    "scenarios": {
+      "S1": {
+        "name": "UnseenDDIs",
+        "description": "未见 DDI 组合（药物见过）",
+        "difficulty": "easy"
+      },
+      "S2": {
+        "name": "Unseendrugs_onedrug",
+        "description": "未见单药物",
+        "difficulty": "medium"
+      },
+      "S3": {
+        "name": "Unseendrugs_twodrugs",
+        "description": "未见双药物",
+        "difficulty": "hard"
+      }
+    }
+  }
+}

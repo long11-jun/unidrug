@@ -1,0 +1,347 @@
+[
+    {
+        "text": "Blood-brain barrier (BBB) penetration is favored by molecules with low TPSA (<90 Å²), moderate LogP (1-3), and MW < 450 Da.",
+        "tags": ["bbb", "tpsa", "logp", "mw", "penetration"],
+        "datasets": ["BBBP", "general"]
+    },
+    {
+        "text": "High lipophilicity (LogP > 3) and low polar surface area enhance passive diffusion across the BBB.",
+        "tags": ["bbb", "lipophilic", "high_logp", "low_tpsa", "passive_diffusion"],
+        "datasets": ["BBBP", "general"]
+    },
+    {
+        "text": "Molecules with hydrogen bond donors (HBD) > 3 typically have poor BBB penetration due to reduced membrane permeability.",
+        "tags": ["bbb", "hbd", "hydrogen_bond", "permeability"],
+        "datasets": ["BBBP", "general"]
+    },
+    {
+        "text": "P-glycoprotein (P-gp) substrates are actively effluxed from the brain; avoid recognition motifs to improve BBB penetration.",
+        "tags": ["bbb", "pgp", "efflux", "transporter"],
+        "datasets": ["BBBP", "general"]
+    },
+    {
+        "text": "Basic amines with pKa 7-10 can cross the BBB via ion trapping mechanism.",
+        "tags": ["bbb", "basic_amine", "pka", "ion_trapping"],
+        "datasets": ["BBBP", "general"]
+    },
+    {
+        "text": "Small, lipophilic molecules without charged groups at physiological pH are good BBB penetrators.",
+        "tags": ["bbb", "lipophilic", "neutral", "small_molecule"],
+        "datasets": ["BBBP", "general"]
+    },
+    {
+        "text": "Aromatic rings and halogen substituents generally favor BBB penetration by increasing lipophilicity.",
+        "tags": ["bbb", "aromatic", "halogen", "lipophilicity"],
+        "datasets": ["BBBP", "general"]
+    },
+    {
+        "text": "Carboxylic acids and sulfonamides typically have poor BBB penetration due to ionization at pH 7.4.",
+        "tags": ["bbb", "carboxylic", "sulfonamide", "ionization", "poor_penetration"],
+        "datasets": ["BBBP", "general"]
+    },
+    {
+        "text": "Nitro-aromatic scaffolds often correlate with hepatotoxicity via reactive metabolites and oxidative stress.",
+        "tags": ["nitro", "aromatic", "hepatotoxicity", "liver"],
+        "datasets": ["SIDER", "ToxCast", "general"]
+    },
+    {
+        "text": "Lipophilic molecules with TPSA < 50 Å² frequently cross the BBB and may trigger CNS side effects including dizziness and sedation.",
+        "tags": ["high_logp", "low_tpsa", "cns", "nervous"],
+        "datasets": ["SIDER", "general"]
+    },
+    {
+        "text": "Sulfonamide motifs can induce hypersensitivity reactions; monitor immune-related adverse events like skin rash and Stevens-Johnson syndrome.",
+        "tags": ["sulfonamide", "immune", "skin", "hypersensitivity"],
+        "datasets": ["SIDER", "general"]
+    },
+    {
+        "text": "High molecular weight compounds (>500 Da) often have poor oral bioavailability and may accumulate, causing chronic toxicity.",
+        "tags": ["high_mw", "bioavailability", "accumulation"],
+        "datasets": ["general"]
+    },
+    {
+        "text": "Molecules with multiple hydrogen bond donors (>5) may have renal excretion issues and nephrotoxicity risk.",
+        "tags": ["high_hbd", "renal", "kidney", "nephrotoxicity"],
+        "datasets": ["SIDER", "general"]
+    },
+    {
+        "text": "Compounds with LogP > 5 tend to accumulate in adipose tissue and may cause metabolic disorders or prolonged half-life effects.",
+        "tags": ["very_high_logp", "metabolic", "accumulation", "lipophilic"],
+        "datasets": ["SIDER", "general"]
+    },
+    {
+        "text": "Aromatic amines can form reactive metabolites through N-oxidation, potentially causing genotoxicity and carcinogenicity.",
+        "tags": ["aromatic_amine", "genotoxicity", "carcinogenicity", "metabolite"],
+        "datasets": ["ToxCast", "general"]
+    },
+    {
+        "text": "Quinolone antibiotics are associated with tendon disorders, QT prolongation, and CNS effects.",
+        "tags": ["quinolone", "tendon", "cardiac", "cns", "qt_prolongation"],
+        "datasets": ["SIDER", "general"]
+    },
+    {
+        "text": "Fluorinated compounds may have extended half-lives and potential thyroid disruption effects.",
+        "tags": ["fluorine", "thyroid", "endocrine", "half_life"],
+        "datasets": ["SIDER", "general"]
+    },
+    {
+        "text": "Polycyclic aromatic structures increase the risk of phototoxicity and skin sensitization.",
+        "tags": ["polycyclic", "aromatic", "phototoxicity", "skin"],
+        "datasets": ["SIDER", "general"]
+    },
+    {
+        "text": "Compounds with reactive functional groups (aldehydes, Michael acceptors) may cause protein adduct formation and idiosyncratic toxicity.",
+        "tags": ["reactive", "aldehyde", "michael_acceptor", "idiosyncratic"],
+        "datasets": ["ToxCast", "general"]
+    },
+    {
+        "text": "Beta-lactam antibiotics can cause allergic reactions ranging from mild rash to severe anaphylaxis.",
+        "tags": ["beta_lactam", "allergy", "anaphylaxis", "immune"],
+        "datasets": ["SIDER", "general"]
+    },
+    {
+        "text": "Drugs with high plasma protein binding may have drug-drug interactions and displacement effects.",
+        "tags": ["protein_binding", "interaction", "displacement"],
+        "datasets": ["general"]
+    },
+    {
+        "text": "Statins are associated with muscle-related adverse events including myalgia and rhabdomyolysis.",
+        "tags": ["statin", "muscle", "myalgia", "rhabdomyolysis"],
+        "datasets": ["SIDER", "general"]
+    },
+    {
+        "text": "NSAIDs can cause gastrointestinal bleeding, renal impairment, and cardiovascular events.",
+        "tags": ["nsaid", "gi_bleeding", "renal", "cardiovascular"],
+        "datasets": ["SIDER", "general"]
+    },
+    {
+        "text": "Compounds with low TPSA (<20 Å²) and high LogP may cause membrane disruption and general cytotoxicity.",
+        "tags": ["very_low_tpsa", "high_logp", "cytotoxicity", "membrane"],
+        "datasets": ["ToxCast", "general"]
+    },
+    {
+        "text": "Hydroxamic acids are often associated with bone marrow suppression and hematological toxicity.",
+        "tags": ["hydroxamic", "bone_marrow", "hematological"],
+        "datasets": ["SIDER", "general"]
+    },
+    {
+        "text": "Drugs metabolized by CYP3A4 are prone to drug interactions with common inhibitors like grapefruit juice.",
+        "tags": ["cyp3a4", "metabolism", "interaction"],
+        "datasets": ["general"]
+    },
+    {
+        "text": "Compounds with multiple chiral centers may have different toxicity profiles for each stereoisomer.",
+        "tags": ["chiral", "stereoisomer", "enantioselective"],
+        "datasets": ["general"]
+    },
+    {
+        "text": "Phosphate-containing drugs may cause electrolyte imbalances and mineral metabolism disorders.",
+        "tags": ["phosphate", "electrolyte", "mineral"],
+        "datasets": ["SIDER", "general"]
+    },
+    {
+        "text": "SIDER side effects are organized by System Organ Class (SOC): Hepatobiliary disorders often linked to reactive metabolites and oxidative stress.",
+        "tags": ["sider", "hepatobiliary", "liver", "soc"],
+        "datasets": ["SIDER"]
+    },
+    {
+        "text": "SIDER SOC: Nervous system disorders include dizziness, headache, somnolence; often correlated with BBB penetration (low TPSA, high LogP).",
+        "tags": ["sider", "nervous", "cns", "bbb", "soc"],
+        "datasets": ["SIDER"]
+    },
+    {
+        "text": "SIDER SOC: Gastrointestinal disorders (nausea, vomiting, diarrhea) are common with oral drugs and irritants.",
+        "tags": ["sider", "gastrointestinal", "gi", "oral", "soc"],
+        "datasets": ["SIDER"]
+    },
+    {
+        "text": "SIDER SOC: Skin and subcutaneous tissue disorders include rash, pruritus, urticaria; often immune-mediated.",
+        "tags": ["sider", "skin", "rash", "immune", "soc"],
+        "datasets": ["SIDER"]
+    },
+    {
+        "text": "SIDER SOC: Cardiac disorders (arrhythmia, QT prolongation) linked to ion channel interactions, especially hERG.",
+        "tags": ["sider", "cardiac", "heart", "arrhythmia", "herg", "soc"],
+        "datasets": ["SIDER"]
+    },
+    {
+        "text": "SIDER SOC: Renal and urinary disorders include nephrotoxicity, often from accumulation or direct tubular damage.",
+        "tags": ["sider", "renal", "kidney", "nephrotoxicity", "soc"],
+        "datasets": ["SIDER"]
+    },
+    {
+        "text": "SIDER SOC: Musculoskeletal disorders (myalgia, arthralgia) associated with statins and fluoroquinolones.",
+        "tags": ["sider", "musculoskeletal", "muscle", "myalgia", "soc"],
+        "datasets": ["SIDER"]
+    },
+    {
+        "text": "SIDER SOC: Psychiatric disorders (anxiety, depression, insomnia) linked to CNS-active compounds.",
+        "tags": ["sider", "psychiatric", "anxiety", "depression", "cns", "soc"],
+        "datasets": ["SIDER"]
+    },
+    {
+        "text": "SIDER SOC: Blood and lymphatic system disorders include anemia, thrombocytopenia; monitor with cytotoxic agents.",
+        "tags": ["sider", "blood", "hematological", "anemia", "soc"],
+        "datasets": ["SIDER"]
+    },
+    {
+        "text": "SIDER SOC: Immune system disorders range from mild hypersensitivity to severe anaphylaxis; sulfonamides and beta-lactams are common triggers.",
+        "tags": ["sider", "immune", "hypersensitivity", "anaphylaxis", "soc"],
+        "datasets": ["SIDER"]
+    },
+    {
+        "text": "SIDER SOC: Eye disorders (blurred vision, dry eyes) may occur with anticholinergic drugs.",
+        "tags": ["sider", "eye", "vision", "anticholinergic", "soc"],
+        "datasets": ["SIDER"]
+    },
+    {
+        "text": "SIDER SOC: Respiratory disorders (dyspnea, cough) can be drug-induced, especially with ACE inhibitors.",
+        "tags": ["sider", "respiratory", "lung", "cough", "soc"],
+        "datasets": ["SIDER"]
+    },
+    {
+        "text": "SIDER SOC: Metabolism and nutrition disorders include weight changes, appetite loss, electrolyte imbalances.",
+        "tags": ["sider", "metabolism", "nutrition", "weight", "soc"],
+        "datasets": ["SIDER"]
+    },
+    {
+        "text": "SIDER SOC: Vascular disorders (hypotension, hypertension, flushing) related to vasoactive compounds.",
+        "tags": ["sider", "vascular", "blood_pressure", "hypotension", "soc"],
+        "datasets": ["SIDER"]
+    },
+    {
+        "text": "SIDER SOC: General disorders (fatigue, fever, pain) are non-specific but frequently reported.",
+        "tags": ["sider", "general", "fatigue", "fever", "soc"],
+        "datasets": ["SIDER"]
+    },
+    {
+        "text": "Carboxylic acid groups often associated with gastrointestinal irritation and potential ulceration.",
+        "tags": ["carboxylic", "gi", "gastrointestinal", "irritation"],
+        "datasets": ["SIDER", "general"]
+    },
+    {
+        "text": "Amide bonds are generally stable but can be hydrolyzed in vivo; monitor for active metabolites.",
+        "tags": ["amide", "metabolite", "hydrolysis"],
+        "datasets": ["general"]
+    },
+    {
+        "text": "Primary amines may undergo oxidative deamination; secondary amines are often more stable.",
+        "tags": ["primary_amine", "secondary_amine", "oxidation", "metabolism"],
+        "datasets": ["general"]
+    },
+    {
+        "text": "Hydroxyl groups increase water solubility but may be sites for glucuronidation and rapid clearance.",
+        "tags": ["hydroxyl", "solubility", "glucuronidation", "clearance"],
+        "datasets": ["general"]
+    },
+    {
+        "text": "Heteroaromatic rings (pyridine, thiophene) can interact with CYP enzymes and affect drug metabolism.",
+        "tags": ["heteroaromatic", "pyridine", "thiophene", "cyp", "metabolism"],
+        "datasets": ["general"]
+    },
+    {
+        "text": "Halogen substituents (Cl, Br, I) increase lipophilicity and may affect metabolic stability.",
+        "tags": ["halogen", "chlorine", "bromine", "lipophilicity"],
+        "datasets": ["general"]
+    },
+    {
+        "text": "Tox21 NR-AR: Androgen receptor agonists/antagonists affect male reproductive function and muscle development. Compounds with steroid-like scaffolds often show AR activity.",
+        "tags": ["tox21", "nr_ar", "androgen", "nuclear_receptor", "steroid", "endocrine"],
+        "datasets": ["Tox21"]
+    },
+    {
+        "text": "Tox21 NR-AR-LBD: Androgen receptor ligand-binding domain assay detects direct AR binding. Phenolic and hydroxyl-substituted aromatics may show activity.",
+        "tags": ["tox21", "nr_ar_lbd", "androgen", "ligand_binding", "phenolic"],
+        "datasets": ["Tox21"]
+    },
+    {
+        "text": "Tox21 NR-ER: Estrogen receptor activity is associated with endocrine disruption. Bisphenols, parabens, and phenolic compounds often bind ER.",
+        "tags": ["tox21", "nr_er", "estrogen", "endocrine_disruptor", "bisphenol", "phenol"],
+        "datasets": ["Tox21"]
+    },
+    {
+        "text": "Tox21 NR-ER-LBD: Estrogen receptor ligand-binding domain assay. Compounds with planar aromatic rings and hydroxyl groups at specific positions mimic estradiol.",
+        "tags": ["tox21", "nr_er_lbd", "estrogen", "ligand_binding", "aromatic", "hydroxyl"],
+        "datasets": ["Tox21"]
+    },
+    {
+        "text": "Tox21 NR-AhR: Aryl hydrocarbon receptor activation is linked to dioxin-like toxicity, immune suppression, and carcinogenicity. Polyhalogenated aromatics are potent AhR agonists.",
+        "tags": ["tox21", "nr_ahr", "aryl_hydrocarbon", "dioxin", "carcinogenicity", "halogenated"],
+        "datasets": ["Tox21"]
+    },
+    {
+        "text": "Tox21 NR-Aromatase: Aromatase inhibition affects estrogen biosynthesis. Triazole and imidazole antifungals are known aromatase inhibitors.",
+        "tags": ["tox21", "nr_aromatase", "aromatase", "estrogen", "triazole", "imidazole"],
+        "datasets": ["Tox21"]
+    },
+    {
+        "text": "Tox21 NR-PPAR-gamma: PPAR-gamma modulates glucose and lipid metabolism. Thiazolidinediones and certain fatty acid derivatives activate this receptor.",
+        "tags": ["tox21", "nr_ppar", "ppar_gamma", "metabolic", "thiazolidinedione", "fatty_acid"],
+        "datasets": ["Tox21"]
+    },
+    {
+        "text": "Tox21 SR-ARE: Antioxidant response element activation indicates oxidative stress response via Nrf2 pathway. Electrophilic compounds and Michael acceptors activate ARE.",
+        "tags": ["tox21", "sr_are", "antioxidant", "oxidative_stress", "nrf2", "electrophile"],
+        "datasets": ["Tox21"]
+    },
+    {
+        "text": "Tox21 SR-ATAD5: ATAD5 pathway activation indicates DNA damage response. Genotoxic compounds, alkylating agents, and intercalators trigger this pathway.",
+        "tags": ["tox21", "sr_atad5", "dna_damage", "genotoxicity", "alkylating", "intercalator"],
+        "datasets": ["Tox21"]
+    },
+    {
+        "text": "Tox21 SR-HSE: Heat shock response element activation indicates protein misfolding stress. Heavy metals, arsenicals, and proteotoxic compounds activate HSE.",
+        "tags": ["tox21", "sr_hse", "heat_shock", "protein_stress", "heavy_metal", "proteotoxic"],
+        "datasets": ["Tox21"]
+    },
+    {
+        "text": "Tox21 SR-MMP: Mitochondrial membrane potential disruption indicates mitochondrial toxicity. Uncouplers, protonophores, and respiratory chain inhibitors affect MMP.",
+        "tags": ["tox21", "sr_mmp", "mitochondria", "membrane_potential", "uncoupler", "respiratory"],
+        "datasets": ["Tox21"]
+    },
+    {
+        "text": "Tox21 SR-p53: p53 pathway activation indicates DNA damage and potential carcinogenicity. Compounds causing strand breaks or crosslinks activate p53.",
+        "tags": ["tox21", "sr_p53", "p53", "dna_damage", "carcinogenicity", "tumor_suppressor"],
+        "datasets": ["Tox21"]
+    },
+    {
+        "text": "Nuclear receptors (NRs) are ligand-activated transcription factors. Small lipophilic molecules with planar aromatic cores and hydrogen bonding groups often show NR activity.",
+        "tags": ["tox21", "nuclear_receptor", "transcription_factor", "lipophilic", "aromatic"],
+        "datasets": ["Tox21", "general"]
+    },
+    {
+        "text": "Stress response pathways (SR) in Tox21 detect cellular damage mechanisms. Electrophilic compounds often activate multiple stress pathways including ARE, p53, and MMP.",
+        "tags": ["tox21", "stress_response", "cellular_toxicity", "electrophile", "reactive"],
+        "datasets": ["Tox21", "general"]
+    },
+    {
+        "text": "Endocrine disrupting chemicals (EDCs) interfere with hormone signaling via NR-ER, NR-AR, or aromatase. Phenolic compounds and plasticizers are common EDCs.",
+        "tags": ["tox21", "endocrine", "edc", "hormone", "phenol", "plasticizer"],
+        "datasets": ["Tox21", "general"]
+    },
+    {
+        "text": "Nitroaromatic compounds often activate SR-p53 and SR-ATAD5 due to their genotoxic potential via nitroreduction to reactive intermediates.",
+        "tags": ["tox21", "nitroaromatic", "genotoxic", "p53", "atad5", "reactive_metabolite"],
+        "datasets": ["Tox21"]
+    },
+    {
+        "text": "Quinones and hydroquinones can cause oxidative stress (SR-ARE activation) and mitochondrial toxicity (SR-MMP) through redox cycling.",
+        "tags": ["tox21", "quinone", "oxidative", "redox", "are", "mmp"],
+        "datasets": ["Tox21"]
+    },
+    {
+        "text": "Heavy metals (Cd, Pb, Hg, As) activate multiple Tox21 stress pathways including SR-HSE, SR-ARE, and SR-MMP due to protein binding and oxidative damage.",
+        "tags": ["tox21", "heavy_metal", "cadmium", "lead", "mercury", "arsenic", "multi_pathway"],
+        "datasets": ["Tox21"]
+    },
+    {
+        "text": "Polycyclic aromatic hydrocarbons (PAHs) are potent NR-AhR agonists and potential carcinogens. Planar, lipophilic structures enhance AhR binding.",
+        "tags": ["tox21", "pah", "ahr", "carcinogen", "planar", "lipophilic"],
+        "datasets": ["Tox21"]
+    },
+    {
+        "text": "Organophosphates may show Tox21 activity through off-target nuclear receptor effects beyond their primary acetylcholinesterase inhibition.",
+        "tags": ["tox21", "organophosphate", "off_target", "nuclear_receptor"],
+        "datasets": ["Tox21"]
+    }
+]

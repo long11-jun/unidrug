@@ -1,0 +1,113 @@
+{
+    "model": "dp",
+    "data": {
+        "drug": {
+            "modality": [
+                "structure",
+                "kg",
+                "text",
+                "smiles"
+            ],
+            "featurizer": {
+                "structure": {
+                    "name": "graphmvp",
+                    "config_path": "configs/encoders/drug/graphmvp.json"
+                },
+                "kg": {
+                    "name": "KGE",
+                    "kg_name": "BMKG",
+                    "kg_path": "{asset_root}/assets/kg/BMKG-DP/",
+                    "save_path": "{asset_root}/assets/kg/BMKG-DP/",
+                    "kge_file": "embedding.pkl",
+                    "embed_dim": 256
+                },
+                "text": {
+                    "name": "RawString",
+                    "max_length": 512,
+                    "fixed_length": 512,
+                    "transformer_type": "bert",
+                    "model_name_or_path": "microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract"
+                },
+                "smiles": {
+                    "name": "RawString",
+                    "max_length": 512,
+                    "fixed_length": 512,
+                    "transformer_type": "bert",
+                    "model_name_or_path": "microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract",
+                    "tokenmol_vocab_file": "../torsion_version/torsion_voc_property.csv",
+                    "tokenmol_precompute": true,
+                    "tokenmol_use_torsion": true,
+                    "tokenmol_max_torsions": 32
+                }
+            }
+        }
+    },
+    "network": {
+        "drug": {
+            "structure": {
+                "name": "graphmvp",
+                "config_path": "configs/encoders/drug/graphmvp.json"
+            },
+            "kg": {
+                "embedding_dim": 256
+            }
+        },
+        "llm": {
+            "name": "qwen",
+            "model_name": "{asset_root}/qwen2.5-3b-instruct",
+            "max_length": 512,
+            "device": "cuda:0",
+            "torch_dtype": "bfloat16",
+            "_note": "device会被命令行参数覆盖"
+        },
+        
+        "_comment": "=== 通用配置: 适配所有MoleculeNet数据集 ===",
+        
+        "_comment_moltoken": "=== MolToken第四模态 ===",
+        "use_moltoken": true,
+        "moltoken": {
+            "model_name": "{asset_root}/ckpts/pretrained",
+            "vocab_file": "../torsion_version/torsion_voc_property.csv",
+            "device": "cuda:0",
+            "max_length": 200,
+            "torch_dtype": "float16"
+        },
+        
+        "_comment_innovation": "=== 创新模块 ===",
+        "use_consistent_feature": true,
+        
+        "_comment_prompt": "=== Prompt配置（dataset_name由命令行--dataset_name覆盖）===",
+        "drug_text_path": "{asset_root}/assets/kg/BMKG-DP/drug.json",
+        "dataset_name": "SIDER",
+        "prompt_max_length": 512,
+        "_note_dataset": "dataset_name会被命令行参数覆盖，支持: SIDER/Tox21/ToxCast/BBBP/BACE/ClinTox/HIV/MUV等",
+        
+        "_comment_modules": "=== 通用模块配置 ===",
+        "use_feature_noise": true,
+        "feature_noise_std": 0.03,
+        "use_attention_pooling": true,
+        "pooling_dropout": 0.15,
+        "use_label_graph": true,
+        "label_graph_dropout": 0.15,
+        "_note_modules": "通用配置：特征噪声增强泛化，LabelGraph建模标签关系",
+        
+        "_comment_regularization": "=== 正则化配置（通用）===",
+        "use_lora": true,
+        "lora_rank": 16,
+        "lora_alpha": 32,
+        "lora_dropout": 0.15,
+        "adapter_dropout": 0.15,
+        "head_dropout": 0.15,
+        
+        "_comment_tokens": "=== Token数量配置（均衡通用）===",
+        "num_struct_tokens": 64,
+        "num_kg_tokens": 48,
+        "num_moltoken_tokens": 56,
+        "_note_tokens": "均衡配置：Structure主导(64) + KG补充(48) + MolToken化学语义(56)",
+        
+        "_comment_contrastive": "=== 模态对比学习 ===",
+        "use_contrastive": true,
+        "contrastive_weight": 0.05,
+        "_note_contrastive": "InfoNCE对比学习：同分子不同模态应相似，不同分子应不同"
+    }
+}
