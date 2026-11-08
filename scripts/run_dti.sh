@@ -16,7 +16,7 @@ STRICT_COLD="${4:-false}"
 SEED="${5:-42}"
 ABLATION="${6:-}"
 
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export TOKENIZERS_PARALLELISM=false
 
 GPU_ID="${CUDA_VISIBLE_DEVICES:-0}"

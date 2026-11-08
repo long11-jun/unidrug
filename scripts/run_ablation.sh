@@ -18,6 +18,7 @@ if [ -z "${TASK}" ]; then
     exit 1
 fi
 
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FLAGS=("no_cmsa,no_cmon" "no_cmon" "no_cmsa" "cmsa_no_2hop" "cmon_no_digest" "cmon_no_lodc" "")
 NAMES=("A_baseline" "B_cmsa" "C_cmon" "D_no_2hop" "E_no_digest" "F_no_lodc" "G_full")
 
@@ -28,15 +29,15 @@ for i in "${!FLAGS[@]}"; do
     case "${TASK}" in
         dp)
             DATASET="${2:-SIDER}"
-            ./run_dp.sh "${DATASET}" single "" "${FLAG}"
+            "${DIR}/run_dp.sh" "${DATASET}" single "" "${FLAG}"
             ;;
         ddi)
-            ./run_ddi.sh LUO single "${FLAG}"
+            "${DIR}/run_ddi.sh" LUO single "${FLAG}"
             ;;
         ppi)
             DATASET="${2:-SHS27k}"
             SPLIT="${3:-DFS}"
-            ./run_ppi.sh "${DATASET}" "${SPLIT}" single "" "0" "${FLAG}"
+            "${DIR}/run_ppi.sh" "${DATASET}" "${SPLIT}" single "" "0" "${FLAG}"
             ;;
         *)
             echo "Ablation in the paper is DP, DDI, and PPI."

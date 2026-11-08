@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIG_PATH="${PROJECT_ROOT}/unidrug/configs/ppi/ppi.json"
 DATASET_PATH="${PROJECT_ROOT}/unidrug/datasets/ppi"
 

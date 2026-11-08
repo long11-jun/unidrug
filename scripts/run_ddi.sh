@@ -8,7 +8,7 @@ ABLATION=${3:-""}
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
 export TOKENIZERS_PARALLELISM=false
 
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIG_PATH="${PROJECT_ROOT}/unidrug/configs/ddi/ddi.json"
 DATASET_PATH="${PROJECT_ROOT}/unidrug/datasets/ddi"
 
