@@ -1,14 +1,14 @@
 # UniDrug
 
-四个任务共用一套模型：Qwen2.5-3B + LoRA，分子图用 GraphMVP，分子 3D token 用 TokenMol，知识图谱用 BMKG。CMSA 补缺失的图谱向量，CMON 做模态正交分解。
+UniDrug uses one model for four drug-discovery tasks. The backbone is Qwen2.5-3B with LoRA. Molecular graphs come from GraphMVP, 3D tokens from TokenMol, and relational features from BMKG. CMSA fills in missing knowledge-graph vectors. CMON decomposes each modality into shared and private parts.
 
-下面这些权重和图谱不在本仓库里，需要自己下载，再放到 `UNIDRUG_ASSET_ROOT`。配置里的 `{asset_root}` 会换成这个路径。
+![UniDrug framework](assets/framework.png)
+
+The pretrained weights and the knowledge graph are not in this repository. Download them and place them under `UNIDRUG_ASSET_ROOT`. `{asset_root}` in the configs is replaced by this path.
 
 ```bash
 export UNIDRUG_ASSET_ROOT=/path/to/assets
 ```
-
-目录需要是这样：
 
 ```text
 $UNIDRUG_ASSET_ROOT/
@@ -19,9 +19,9 @@ $UNIDRUG_ASSET_ROOT/
   assets/kg/BMKG-DP/
 ```
 
-## 环境
+## Setup
 
-Python 3.10，PyTorch 2.4.1，CUDA 12.1。
+Python 3.10, PyTorch 2.4.1, CUDA 12.1.
 
 ```bash
 pip install torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 --index-url https://download.pytorch.org/whl/cu121
@@ -29,13 +29,13 @@ pip install -r requirements.txt
 pip install torch-scatter torch-sparse torch-cluster torch-spline-conv -f https://data.pyg.org/whl/torch-2.4.0+cu121.html
 ```
 
-PubMedBERT（`microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract`）第一次跑文本特征时会从 Hugging Face 拉取。
+PubMedBERT (`microsoft/BiomedNLP-PubMedBERT-base-uncased-abstract`) is downloaded from Hugging Face the first time text features are built.
 
-## 需要单独下载的模型
+## Models to download
 
 ### Qwen2.5-3B-Instruct
 
-从 [Qwen/Qwen2.5-3B-Instruct](https://huggingface.co/Qwen/Qwen2.5-3B-Instruct) 下到 `qwen2.5-3b-instruct/`。
+Download [Qwen/Qwen2.5-3B-Instruct](https://huggingface.co/Qwen/Qwen2.5-3B-Instruct) into `qwen2.5-3b-instruct/`.
 
 ```bash
 huggingface-cli download Qwen/Qwen2.5-3B-Instruct --local-dir $UNIDRUG_ASSET_ROOT/qwen2.5-3b-instruct
@@ -43,9 +43,9 @@ huggingface-cli download Qwen/Qwen2.5-3B-Instruct --local-dir $UNIDRUG_ASSET_ROO
 
 ### TokenMol
 
-预训练权重在 [Zenodo](https://zenodo.org/records/13428828)，代码和词表说明在 [Token-Mol](https://github.com/jkwang93/Token-Mol)。把 `config.json` 和 `pytorch_model.bin` 放到 `ckpts/pretrained/`。本仓库自带词表 `torsion_version/torsion_voc_property.csv`。
+The pretrained checkpoint is on [Zenodo](https://zenodo.org/records/13428828). The code and vocabulary notes are in [Token-Mol](https://github.com/jkwang93/Token-Mol). Put `config.json` and `pytorch_model.bin` in `ckpts/pretrained/`. This repository already includes `torsion_version/torsion_voc_property.csv`.
 
-3D token 可以训练前先算好：
+3D tokens can be cached before training:
 
 ```bash
 python scripts/precompute_tokenmol_3d.py --dataset SIDER
@@ -54,30 +54,30 @@ python precompute_tokenmol_dti.py --dataset yamanishi08
 
 ### GraphMVP
 
-权重来自 [GraphMVP](https://github.com/chao1224/GraphMVP) 的预训练 GIN，Hugging Face 上的文件是 [model.pth](https://huggingface.co/chao1224/MoleculeSTM/blob/main/pretrained_GraphMVP/GraphMVP_G/model.pth)。下载后改名为 `pretraining_model.pth`，放到 `ckpts/gnn_ckpts/graphmvp/`。
+Use the pretrained GIN weights from [GraphMVP](https://github.com/chao1224/GraphMVP). The file on Hugging Face is [model.pth](https://huggingface.co/chao1224/MoleculeSTM/blob/main/pretrained_GraphMVP/GraphMVP_G/model.pth). Rename it to `pretraining_model.pth` and put it in `ckpts/gnn_ckpts/graphmvp/`.
 
 ### BMKG
 
-图谱用 [KEDD](https://github.com/icycookies/KEDD_temporal) 发布的 [BMKG](https://drive.google.com/drive/folders/1U2M3383-3dDAyLTAcXGcUagAEjlB6QgN?usp=sharing)。解压后放到 `assets/kg/BMKG/`，里面要有 `drug.json`、`protein.json`、`embedding.pkl`、`links.csv`。
+Download [BMKG](https://drive.google.com/drive/folders/1U2M3383-3dDAyLTAcXGcUagAEjlB6QgN?usp=sharing) from the [KEDD](https://github.com/icycookies/KEDD_temporal) release. Place it at `assets/kg/BMKG/`. The directory needs `drug.json`, `protein.json`, `embedding.pkl`, and `links.csv`.
 
-分子性质用的 `assets/kg/BMKG-DP/` 是同一套文件。把 BMKG 拷一份到这个目录即可。`prone_embedding.pkl` 没有也行，训练时缺 `embedding.pkl` 才会用 ProNE 现算。
+Drug-property training reads `assets/kg/BMKG-DP/`, which uses the same files. Copy the BMKG directory there. `prone_embedding.pkl` is optional; ProNE is only run when `embedding.pkl` is missing.
 
 ## DTI
 
-Yamanishi08 和 BMKG-DTI 在 `unidrug/datasets/dti/`。原始数据见 [KEDD 的 DTI 数据](https://drive.google.com/drive/folders/1AaUWLlOOua5BH7Q-bBVUBgOugDfWF3ip?usp=sharing)，两个数据集都放在 `unidrug/datasets/dti/` 下。
+Yamanishi08 and BMKG-DTI are under `unidrug/datasets/dti/`. The original files are in the [KEDD DTI release](https://drive.google.com/drive/folders/1AaUWLlOOua5BH7Q-bBVUBgOugDfWF3ip?usp=sharing). Put both datasets in `unidrug/datasets/dti/`.
 
-5 折，指标是 AUROC 和 AUPR。划分：`warm`、`cold_drug`、`cold_protein`、`cold_cluster`。第四个参数 `false` 是 interaction-cold，`true` 是 knowledge-cold（去掉留出实体的图谱三元组）。
+Evaluation is 5-fold AUROC and AUPR. Splits are `warm`, `cold_drug`, `cold_protein`, and `cold_cluster`. The fourth argument is `false` for interaction-cold and `true` for knowledge-cold, which drops knowledge-graph triples of the held-out entities.
 
 ```bash
-bash run_dti.sh yamanishi08 warm 0
-bash run_dti.sh yamanishi08 cold_drug 0 false
-bash run_dti.sh yamanishi08 cold_drug 0 true
-bash run_dti.sh bmkg-dti cold_cluster all false
+bash scripts/run_dti.sh yamanishi08 warm 0
+bash scripts/run_dti.sh yamanishi08 cold_drug 0 false
+bash scripts/run_dti.sh yamanishi08 cold_drug 0 true
+bash scripts/run_dti.sh bmkg-dti cold_cluster all false
 ```
 
 ## DP
 
-SIDER、ClinTox、HIV、BACE 在 `unidrug/datasets/dp/moleculenet/`。MoleculeNet 原始包：
+SIDER, ClinTox, HIV, and BACE are under `unidrug/datasets/dp/moleculenet/`. The MoleculeNet archive:
 
 ```bash
 wget http://snap.stanford.edu/gnn-pretrain/data/chem_dataset.zip
@@ -86,40 +86,40 @@ mkdir -p unidrug/datasets/dp
 mv dataset unidrug/datasets/dp/moleculenet
 ```
 
-解压后删掉各数据集里的 `processed/`。scaffold 划分，指标 AUROC。
+Remove the `processed/` directory of each dataset after unzipping. The split is scaffold, and the metric is AUROC.
 
 ```bash
-bash run_dp.sh SIDER
-bash run_dp.sh ClinTox
-bash run_dp.sh HIV
-bash run_dp.sh Bace
+bash scripts/run_dp.sh SIDER
+bash scripts/run_dp.sh ClinTox
+bash scripts/run_dp.sh HIV
+bash scripts/run_dp.sh Bace
 ```
 
 ## DDI
 
-论文里的实验是 Luo 的二分类，数据在 `unidrug/datasets/ddi/MSSL2drug/`。原始边表见 [DDInet.txt](https://github.com/pengsl-lab/MSSL/blob/main/data/DownStreamdata/DDInet.txt)。指标 AUROC 和 AUPR。
+The reported experiment is binary classification on Luo's dataset, stored in `unidrug/datasets/ddi/MSSL2drug/`. The original edge list is [DDInet.txt](https://github.com/pengsl-lab/MSSL/blob/main/data/DownStreamdata/DDInet.txt). Metrics are AUROC and AUPR.
 
 ```bash
-bash run_ddi.sh LUO
+bash scripts/run_ddi.sh LUO
 ```
 
 ## PPI
 
-SHS27k 和 SHS148k 在 `unidrug/datasets/ppi/`。原始数据见 [GNN_PPI](https://github.com/lvguofeng/GNN_PPI/tree/main/data)。7 类，划分用 `BFS` 或 `DFS`，指标 Micro-F1。
+SHS27k and SHS148k are under `unidrug/datasets/ppi/`. The original files are in [GNN_PPI](https://github.com/lvguofeng/GNN_PPI/tree/main/data). There are 7 classes. Splits are `BFS` or `DFS`, and the metric is Micro-F1.
 
 ```bash
-bash run_ppi.sh SHS27k DFS single
-bash run_ppi.sh SHS148k BFS single
+bash scripts/run_ppi.sh SHS27k DFS single
+bash scripts/run_ppi.sh SHS148k BFS single
 ```
 
-## 消融
+## Ablation
 
-对应论文里 DDI、PPI、DP 的组件消融。A 到 G 依次是：去掉 CMSA 和 CMON、只留 CMSA、只留 CMON、去掉 2-hop、去掉 digest、去掉 LODC、完整模型。
+These runs match the component ablations for DDI, PPI, and DP. Variants A to G are: no CMSA and no CMON, CMSA only, CMON only, without 2-hop retrieval, without digest tokens, without LODC, and the full model.
 
 ```bash
-bash run_ablation.sh dp SIDER
-bash run_ablation.sh ddi
-bash run_ablation.sh ppi SHS27k DFS
+bash scripts/run_ablation.sh dp SIDER
+bash scripts/run_ablation.sh ddi
+bash scripts/run_ablation.sh ppi SHS27k DFS
 ```
 
-日志和 checkpoint 写到 `ckpts/`。没设 `CUDA_VISIBLE_DEVICES` 时用 0 号卡。
+Logs and checkpoints are written to `ckpts/`. If `CUDA_VISIBLE_DEVICES` is unset, the scripts use GPU 0.
