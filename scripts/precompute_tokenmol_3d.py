@@ -358,7 +358,7 @@ def precompute_dataset(
 def main():
     parser = argparse.ArgumentParser(description="Precompute Token-Mol 3D Torsion Tokens")
     parser.add_argument("--dataset", type=str, default="SIDER", 
-                        help="Dataset name (SIDER, Tox21, ClinTox, BBBP, etc.)")
+                        help="Dataset name: SIDER, ClinTox, HIV, or Bace")
     parser.add_argument("--all", action="store_true", 
                         help="Process all datasets")
     parser.add_argument(
@@ -400,7 +400,7 @@ def main():
         sys.exit(1)
     
     if args.all:
-        datasets = ["SIDER", "Tox21", "ClinTox", "BBBP", "Bace", "HIV", "MUV"]
+        datasets = ["SIDER", "ClinTox", "HIV", "Bace"]
         for ds in datasets:
             print(f"\n{'='*60}")
             print(f"Processing {ds}...")

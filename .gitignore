@@ -5,3 +5,8 @@ ckpts/
 *.pth
 .DS_Store
 KEDD_temporal/
+
+unidrug/datasets/dti/
+unidrug/datasets/dp/
+unidrug/datasets/ddi/
+unidrug/datasets/ppi/

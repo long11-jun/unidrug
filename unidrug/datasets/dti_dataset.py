@@ -266,9 +266,7 @@ class DTIDataset(Dataset, ABC):
             dataset_name = "yamanishi08"
         elif dataset_name == "bmkg_dti":
             dataset_name = "bmkg_dti"
-        elif dataset_name == "human":
-            dataset_name = "human"
-        
+
         repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         cache_dir = os.path.join(repo_root, "cache", "tokenmol_3d")
         cache_file = os.path.join(cache_dir, f"tokenmol_3d_{dataset_name}.pkl")
@@ -316,9 +314,7 @@ class DTIDataset(Dataset, ABC):
             dataset_name = "yamanishi08"
         elif dataset_name == "bmkg_dti":
             dataset_name = "bmkg_dti"
-        elif dataset_name == "human":
-            dataset_name = "human"
-        
+
         repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         cache_dir = os.path.join(repo_root, "cache", "foldseek_3di")
         cache_file = os.path.join(cache_dir, f"foldseek_3di_{dataset_name}.pkl")
@@ -529,68 +525,6 @@ class MSSL2drug(DTIClassificationDataset):
                 self.pair_index.append((i, j))
                 self.labels.append(label)
 
-class Human(DTIClassificationDataset):
-    """Human DTI dataset with pre-defined train/val/test splits.
-    
-    """
-    def __init__(self, path, config, split_strategy):
-        if split_strategy != "warm":
-            logger.warning(f"Human dataset only supports 'warm' split (pre-defined), ignoring '{split_strategy}'")
-        super(Human, self).__init__(path, config, "warm")
-
-    def _load_data(self):
-        train_df = pd.read_csv(os.path.join(self.path, "train.csv"))
-        val_df = pd.read_csv(os.path.join(self.path, "val.csv"))
-        test_df = pd.read_csv(os.path.join(self.path, "test.csv"))
-        
-        all_df = pd.concat([train_df, val_df, test_df], ignore_index=True)
-        
-        unique_smiles = all_df["SMILES"].unique().tolist()
-        unique_proteins = all_df["Protein"].unique().tolist()
-        
-        self.smiles = unique_smiles
-        self.proteins = unique_proteins
-        
-        drugsmi2index = {smi: idx for idx, smi in enumerate(self.smiles)}
-        proteinseq2index = {seq: idx for idx, seq in enumerate(self.proteins)}
-        
-        self.pair_index = []
-        self.labels = []
-        
-        for _, row in all_df.iterrows():
-            drug_idx = drugsmi2index[row["SMILES"]]
-            prot_idx = proteinseq2index[row["Protein"]]
-            self.pair_index.append((drug_idx, prot_idx))
-            self.labels.append(int(row["Y"]))
-        
-        self.train_size = len(train_df)
-        self.val_size = len(val_df)
-        self.test_size = len(test_df)
-        
-        self.local_drug2text = {}
-        self.local_protein2text = {}
-        
-        logger.info(f"Human DTI dataset loaded:")
-        logger.info(f"  Total: {len(self)} samples")
-        logger.info(f"  Drugs: {len(self.smiles)}, Proteins: {len(self.proteins)}")
-        logger.info(f"  Train: {self.train_size}, Val: {self.val_size}, Test: {self.test_size}")
-        logger.info(f"  Positive ratio: {sum(self.labels)/len(self.labels):.2%}")
-
-    def _train_test_split(self):
-        
-        train_indices = list(range(self.train_size))
-        val_indices = list(range(self.train_size, self.train_size + self.val_size))
-        test_indices = list(range(self.train_size + self.val_size, len(self)))
-        
-        self.folds = [{
-            "train": train_indices + val_indices,
-            "val": val_indices,
-            "test": test_indices
-        }]
-        self.nfolds = 1
-        logger.info(f"[Human] Pre-defined split: train={len(train_indices)}, val={len(val_indices)}, test={len(test_indices)}")
-
-
 class DTIRegressionDataset(DTIDataset):
     def __init__(self, path, config, split_strategy):
         self.dataset_type = 'regression'
@@ -644,8 +578,7 @@ class Davis_KIBA(DTIRegressionDataset):
 SUPPORTED_DTI_DATASETS = {
     "yamanishi08": Yamanishi08,
     "bmkg-dti": BMKG_DTI,
-    'mssl2drug': MSSL2drug,
-    "human": Human,
+    "mssl2drug": MSSL2drug,
     "davis": Davis_KIBA,
-    "kiba": Davis_KIBA
+    "kiba": Davis_KIBA,
 }

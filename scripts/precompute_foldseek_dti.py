@@ -30,7 +30,6 @@ sys.path.insert(0, str(PROJECT_ROOT))
 DTI_DATASETS = {
     "yamanishi08": "unidrug/datasets/dti/Yamanishi08",
     "bmkg_dti": "unidrug/datasets/dti/BMKG_DTI",
-    "human": "unidrug/datasets/dti/human",
 }
 
 FOLDSEEK_3DI_ALPHABET = "ACDEFGHIKLMNPQRSTVWY"
@@ -51,37 +50,20 @@ def seq_hash(seq: str) -> str:
 
 
 def load_protein_sequences(dataset_name: str, project_root: Path) -> Dict[str, str]:
-    
-    import pandas as pd
-    
     dataset_path = project_root / DTI_DATASETS.get(dataset_name.lower(), "")
     if not dataset_path.exists():
         print(f"[ERROR] Dataset not found: {dataset_path}")
         return {}
-    
+
     sequences = set()
-    
-    if dataset_name.lower() == "human":
-        for csv_file in ["train.csv", "val.csv", "test.csv"]:
-            csv_path = dataset_path / csv_file
-            if csv_path.exists():
-                df = pd.read_csv(csv_path)
-                seq_col = None
-                for c in ["Sequence", "sequence", "target_sequence", "Target_Sequence"]:
-                    if c in df.columns:
-                        seq_col = c
-                        break
-                if seq_col:
-                    sequences.update(df[seq_col].dropna().tolist())
-    else:
-        prot_json = dataset_path / "protein.json"
-        if prot_json.exists():
-            with open(prot_json, 'r') as f:
-                prot_data = json.load(f)
-            for pid, info in prot_data.items():
-                seq = info.get("sequence", "")
-                if seq:
-                    sequences.add(seq)
+    prot_json = dataset_path / "protein.json"
+    if prot_json.exists():
+        with open(prot_json, 'r') as f:
+            prot_data = json.load(f)
+        for pid, info in prot_data.items():
+            seq = info.get("sequence", "")
+            if seq:
+                sequences.add(seq)
     
     print(f"[INFO] Dataset: {dataset_name}, unique proteins: {len(sequences)}")
     return {seq: seq for seq in sequences}
@@ -342,7 +324,7 @@ def precompute_dataset(
 def main():
     parser = argparse.ArgumentParser(description="Precompute FoldSeek 3Di for DTI proteins")
     parser.add_argument("--dataset", type=str, default="yamanishi08",
-                        help="Dataset name (yamanishi08, bmkg_dti, human)")
+                        help="Dataset name (yamanishi08, bmkg_dti)")
     parser.add_argument("--all", action="store_true", help="Process all DTI datasets")
     parser.add_argument("--mode", type=str, default="seq_approx",
                         choices=["esmfold", "from_pdb", "seq_approx"],

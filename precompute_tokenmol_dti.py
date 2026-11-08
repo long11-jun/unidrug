@@ -8,7 +8,6 @@ file before the moltoken branch of CMSA and CMON.
 
     python precompute_tokenmol_dti.py --dataset yamanishi08
     python precompute_tokenmol_dti.py --dataset bmkg_dti
-    python precompute_tokenmol_dti.py --dataset human
     python precompute_tokenmol_dti.py --all
 """
 
@@ -40,7 +39,6 @@ except ImportError:
 DTI_DATASETS = {
     "yamanishi08": "unidrug/datasets/dti/Yamanishi08",
     "bmkg_dti": "unidrug/datasets/dti/BMKG_DTI",
-    "human": "unidrug/datasets/dti/human",
 }
 
 
@@ -188,39 +186,24 @@ def precompute_dti_dataset(
     num_workers: int = 8,
     timeout_sec: int = 60,
 ):
-    
-    import pandas as pd
-    
     dataset_path = project_root / DTI_DATASETS.get(dataset_name.lower(), "")
     if not dataset_path.exists():
         print(f"[ERROR] Dataset not found: {dataset_path}")
         return
-    
+
+    drug_json = dataset_path / "drug.json"
+    if not drug_json.exists():
+        print(f"[ERROR] drug.json not found: {drug_json}")
+        return
+
+    with open(drug_json, 'r') as f:
+        drug_data = json.load(f)
+
     smiles_list = []
-    
-    if dataset_name.lower() == "human":
-        for csv_file in ["train.csv", "val.csv", "test.csv"]:
-            csv_path = dataset_path / csv_file
-            if csv_path.exists():
-                df = pd.read_csv(csv_path)
-                if "SMILES" in df.columns:
-                    smiles_list.extend(df["SMILES"].dropna().tolist())
-        if not smiles_list:
-            print(f"[ERROR] No SMILES found in human dataset")
-            return
-    else:
-        drug_json = dataset_path / "drug.json"
-        if not drug_json.exists():
-            print(f"[ERROR] drug.json not found: {drug_json}")
-            return
-        
-        with open(drug_json, 'r') as f:
-            drug_data = json.load(f)
-        
-        for drug_id, info in drug_data.items():
-            smi = info.get("SMILES", "")
-            if smi:
-                smiles_list.append(smi)
+    for drug_id, info in drug_data.items():
+        smi = info.get("SMILES", "")
+        if smi:
+            smiles_list.append(smi)
     
     unique_smiles = list(set(smiles_list))
     print(f"[INFO] Dataset: {dataset_name}")

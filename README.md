@@ -64,7 +64,7 @@ Drug-property training reads `assets/kg/BMKG-DP/`, which uses the same files. Co
 
 ## DTI
 
-Yamanishi08 and BMKG-DTI are under `unidrug/datasets/dti/`. The original files are in the [KEDD DTI release](https://drive.google.com/drive/folders/1AaUWLlOOua5BH7Q-bBVUBgOugDfWF3ip?usp=sharing). Put both datasets in `unidrug/datasets/dti/`.
+Download Yamanishi08 and BMKG-DTI from the [KEDD DTI release](https://drive.google.com/drive/folders/1AaUWLlOOua5BH7Q-bBVUBgOugDfWF3ip?usp=sharing). Put both datasets under `unidrug/datasets/dti/`.
 
 Evaluation is 5-fold AUROC and AUPR. Splits are `warm`, `cold_drug`, `cold_protein`, and `cold_cluster`. The fourth argument is `false` for interaction-cold and `true` for knowledge-cold, which drops knowledge-graph triples of the held-out entities.
 
@@ -77,7 +77,7 @@ bash scripts/run_dti.sh bmkg-dti cold_cluster all false
 
 ## DP
 
-SIDER, ClinTox, HIV, and BACE are under `unidrug/datasets/dp/moleculenet/`. The MoleculeNet archive:
+Download MoleculeNet from [chem_dataset.zip](http://snap.stanford.edu/gnn-pretrain/data/chem_dataset.zip). Unzip it and put the folder under `unidrug/datasets/dp/moleculenet/`. Remove the `processed/` directory of each dataset. The paper runs use SIDER, ClinTox, HIV, and BACE. The split is scaffold, and the metric is AUROC.
 
 ```bash
 wget http://snap.stanford.edu/gnn-pretrain/data/chem_dataset.zip
@@ -85,8 +85,6 @@ unzip chem_dataset.zip
 mkdir -p unidrug/datasets/dp
 mv dataset unidrug/datasets/dp/moleculenet
 ```
-
-Remove the `processed/` directory of each dataset after unzipping. The split is scaffold, and the metric is AUROC.
 
 ```bash
 bash scripts/run_dp.sh SIDER
@@ -97,7 +95,9 @@ bash scripts/run_dp.sh Bace
 
 ## DDI
 
-The reported experiment is binary classification on Luo's dataset, stored in `unidrug/datasets/ddi/MSSL2drug/`. The original edge list is [DDInet.txt](https://github.com/pengsl-lab/MSSL/blob/main/data/DownStreamdata/DDInet.txt). Metrics are AUROC and AUPR.
+Luo's dataset is [DDInet.txt](https://github.com/pengsl-lab/MSSL/blob/main/data/DownStreamdata/DDInet.txt). Drug names are in [drug.txt](https://github.com/pengsl-lab/MSSL/blob/main/data/BioHNsdata/drug.txt). Put `DDInet.txt`, `drug.txt`, and `drug_smiles.json` under `unidrug/datasets/ddi/MSSL2drug/`. `drug_smiles.json` maps each drug name in `drug.txt` to a SMILES string. Metrics are AUROC and AUPR.
+
+S1, S2, and S3 are not in the reported experiment. Those splits are in [MeTDDI](https://github.com/LabWeng/MeTDDI), downloaded from the [MeTDDI data page](http://www.wengzq-lab.cn/ddi/MeTDDI_downloads.php). Place the CSV files under `unidrug/datasets/ddi/UnseenDDIs/` and `unidrug/datasets/ddi/Unseendrugs/`.
 
 ```bash
 bash scripts/run_ddi.sh LUO
@@ -105,7 +105,7 @@ bash scripts/run_ddi.sh LUO
 
 ## PPI
 
-SHS27k and SHS148k are under `unidrug/datasets/ppi/`. The original files are in [GNN_PPI](https://github.com/lvguofeng/GNN_PPI/tree/main/data). There are 7 classes. Splits are `BFS` or `DFS`, and the metric is Micro-F1.
+Download SHS27k and SHS148k from [GNN_PPI](https://github.com/lvguofeng/GNN_PPI/tree/main/data). Put them under `unidrug/datasets/ppi/`. There are 7 classes. Splits are `BFS` or `DFS`, and the metric is Micro-F1.
 
 ```bash
 bash scripts/run_ppi.sh SHS27k DFS single
@@ -128,14 +128,14 @@ Logs and checkpoints are written to `ckpts/`. If `CUDA_VISIBLE_DEVICES` is unset
 
 These scripts are not part of training. They build caches that CMSA and CMON read, or they redraw figures.
 
-`precompute_tokenmol_dti.py` sits at the repository root. It turns DTI SMILES into TokenMol sequences with RDKit torsion angles and writes `cache/tokenmol_3d/tokenmol_3d_{dataset}.pkl`. DTI training loads that file for the moltoken branch. Datasets are `yamanishi08`, `bmkg_dti`, and `human`.
+`precompute_tokenmol_dti.py` sits at the repository root. It turns DTI SMILES into TokenMol sequences with RDKit torsion angles and writes `cache/tokenmol_3d/tokenmol_3d_{dataset}.pkl`. DTI training loads that file for the moltoken branch. Datasets are `yamanishi08` and `bmkg_dti`.
 
 ```bash
 python precompute_tokenmol_dti.py --dataset yamanishi08
 python precompute_tokenmol_dti.py --all
 ```
 
-`scripts/precompute_tokenmol_3d.py` does the same for MoleculeNet drug-property sets such as SIDER. `scripts/precompute_tokenmol_human.py` is the single-process Human DTI cache. `scripts/precompute_foldseek_dti.py` builds protein 3Di sequences for the protein branch (`esmfold`, `foldseek_api`, `from_pdb`, or `seq_approx`). `scripts/regenerate_ppi_dfs_split.py` rebuilds the PPI DFS split from the same deduplicated pairs that `PPIDataset` uses.
+`scripts/precompute_tokenmol_3d.py` does the same for SIDER, ClinTox, HIV, and BACE. `scripts/precompute_foldseek_dti.py` builds protein 3Di sequences for the protein branch (`esmfold`, `foldseek_api`, `from_pdb`, or `seq_approx`). `scripts/regenerate_ppi_dfs_split.py` rebuilds the PPI DFS split from the same deduplicated pairs that `PPIDataset` uses.
 
 `scripts/vis_sacmsa_heatmap.py`, `scripts/vis_cmon_radar.py`, and `scripts/vis_digest_attention.py` draw the CMSA retrieval, CMON reliability, and digest-attention figures from saved explanation files.
 
