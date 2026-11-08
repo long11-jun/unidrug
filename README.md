@@ -141,13 +141,4 @@ python precompute_tokenmol_dti.py --all
 
 ## Updates
 
-This repository will keep changing. New code is committed on `main` and pushed again after each update. From the repository root:
-
-```bash
-export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0='*'
-git add -A
-git -c user.name='long11-jun' -c user.email='song15517965640@163.com' commit -m "Describe the change"
-git push origin main
-```
-
-The `export` line is only needed on this shared filesystem, where git otherwise refuses the directory. It does not change your git config. Do not commit weight files under `ckpts/` or the external asset directory.
+This repository will continue to be updated.
