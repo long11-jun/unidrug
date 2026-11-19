@@ -64,7 +64,7 @@ Drug-property training reads `assets/kg/BMKG-DP/`, which uses the same files. Co
 
 ## DTI
 
-Download Yamanishi08 and BMKG-DTI from the [KEDD DTI release](https://drive.google.com/drive/folders/1AaUWLlOOua5BH7Q-bBVUBgOugDfWF3ip?usp=sharing). Put both datasets under `unidrug/datasets/dti/`.
+Yamanishi08 and BMKG-DTI are in `unidrug/datasets/dti/`.
 
 Evaluation is 5-fold AUROC and AUPR. Splits are `warm`, `cold_drug`, `cold_protein`, and `cold_cluster`. The fourth argument is `false` for interaction-cold and `true` for knowledge-cold, which drops knowledge-graph triples of the held-out entities.
 
@@ -77,14 +77,7 @@ bash scripts/run_dti.sh bmkg-dti cold_cluster all false
 
 ## DP
 
-Download MoleculeNet from [chem_dataset.zip](http://snap.stanford.edu/gnn-pretrain/data/chem_dataset.zip). Unzip it and put the folder under `unidrug/datasets/dp/moleculenet/`. Remove the `processed/` directory of each dataset. The paper runs use SIDER, ClinTox, HIV, and BACE. The split is scaffold, and the metric is AUROC.
-
-```bash
-wget http://snap.stanford.edu/gnn-pretrain/data/chem_dataset.zip
-unzip chem_dataset.zip
-mkdir -p unidrug/datasets/dp
-mv dataset unidrug/datasets/dp/moleculenet
-```
+SIDER, ClinTox, HIV, and BACE are in `unidrug/datasets/dp/moleculenet/`. The split is scaffold, and the metric is AUROC.
 
 ```bash
 bash scripts/run_dp.sh SIDER
@@ -95,7 +88,7 @@ bash scripts/run_dp.sh Bace
 
 ## DDI
 
-Luo's dataset is [DDInet.txt](https://github.com/pengsl-lab/MSSL/blob/main/data/DownStreamdata/DDInet.txt). Drug names are in [drug.txt](https://github.com/pengsl-lab/MSSL/blob/main/data/BioHNsdata/drug.txt). Put `DDInet.txt`, `drug.txt`, and `drug_smiles.json` under `unidrug/datasets/ddi/MSSL2drug/`. `drug_smiles.json` maps each drug name in `drug.txt` to a SMILES string. Metrics are AUROC and AUPR.
+Luo's files are in `unidrug/datasets/ddi/MSSL2drug/`: `DDInet.txt`, `drug.txt`, and `drug_smiles.json`. Metrics are AUROC and AUPR.
 
 S1, S2, and S3 are not in the reported experiment. Those splits are in [MeTDDI](https://github.com/LabWeng/MeTDDI), downloaded from the [MeTDDI data page](http://www.wengzq-lab.cn/ddi/MeTDDI_downloads.php). Place the CSV files under `unidrug/datasets/ddi/UnseenDDIs/` and `unidrug/datasets/ddi/Unseendrugs/`.
 
@@ -105,7 +98,7 @@ bash scripts/run_ddi.sh LUO
 
 ## PPI
 
-Download SHS27k and SHS148k from [GNN_PPI](https://github.com/lvguofeng/GNN_PPI/tree/main/data). Put them under `unidrug/datasets/ppi/`. There are 7 classes. Splits are `BFS` or `DFS`, and the metric is Micro-F1.
+SHS27k and SHS148k are in `unidrug/datasets/ppi/`, including `split_bfs.json` and `split_dfs.json`. There are 7 classes. Splits are `BFS` or `DFS`, and the metric is Micro-F1.
 
 ```bash
 bash scripts/run_ppi.sh SHS27k DFS single
